@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toErrorInfo } from "@/lib/api";
 import { downloadText, slugify } from "@/lib/download";
+import type { ExportJob } from "@/lib/exportVideo";
 import { useEndCardImage, withEndCard } from "@/lib/endCard";
 import { HEALTH_DISCLAIMER } from "@/lib/config";
 import { assemblePrompt } from "@/lib/prompt";
@@ -94,6 +95,8 @@ export function StoryStep(props: Props) {
 
   /** The audio player is created on first use, which must be inside a click (browser rule). */
   const getAudio = useCallback(() => (audioRef.current ??= new StoryAudio()), []);
+  // What to build when the user asks for the file; filled in below, once the video is known.
+  const exportJob = useRef<() => Promise<ExportJob | null>>(async () => null);
   const recording = useRecording(
     playerRef,
     useMemo(
@@ -105,6 +108,7 @@ export function StoryStep(props: Props) {
       }),
       [getAudio],
     ),
+    useCallback(() => exportJob.current(), []),
   );
   const { isRecording, invalidate, cancel } = recording;
 
@@ -281,6 +285,20 @@ export function StoryStep(props: Props) {
       ),
     [dims.width, dims.height, duration, draw, describe, endCardOn, endCardImage],
   );
+
+  useEffect(() => {
+    exportJob.current = async () => {
+      if (!video.draw) return null;
+      return {
+        width: dims.width,
+        height: dims.height,
+        duration: video.duration,
+        draw: video.draw,
+        // All the voice clips, placed at their moments, as one sound track.
+        sound: hasVoices ? await getAudio().mixdown(schedule, video.duration) : null,
+      };
+    };
+  });
 
   /** Any edit, new picture or new voice makes an already recorded video out of date. */
   const changeStory = useCallback(
@@ -564,6 +582,7 @@ export function StoryStep(props: Props) {
             duration={video.duration}
             fileBase={fileBase}
             scriptLabel="Story (.json)"
+            live={recording.live}
             title={story.title}
             caption={suggestCaption({
               title: story.title,

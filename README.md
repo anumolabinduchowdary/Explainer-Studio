@@ -19,11 +19,11 @@ There are two sections:
 2. **Prompt**: the app writes a five-part prompt (Act as, Goal, Context, Constraints, Output).
    You can edit every part and see the exact text that will be sent.
 3. **Video**: OpenAI writes the storyboard. The app draws it with animated text and simple
-   illustrations. Edit, reorder, delete or rewrite scenes, then record and download.
+   illustrations. Edit, reorder, delete or rewrite scenes, then create the video and download.
 
 Explainer videos use OpenAI for text only. Cartoon stories also use OpenAI's image model to
 draw the pictures and its speech model for the voices. In both, the video itself is animated
-and recorded in your browser, so no video-generation service is needed.
+and turned into a video file in your browser, so no video-generation service is needed.
 
 ## Setup
 
@@ -177,6 +177,21 @@ This uses the browser's built-in sharing, so the app never holds anyone's Instag
 YouTube login. Posting with no taps at all would need Meta's and Google's publishing
 programmes: see "Next steps".
 
+## How the video file is made
+
+**Create video** builds the file one frame at a time: each frame is drawn at its exact moment
+and encoded, and the voices are mixed into a single sound track. Nothing depends on how fast
+the device is or whether the screen stays on, so the picture cannot freeze while the sound
+carries on.
+
+- The result is a standard MP4: H.264 picture at a steady 30 frames a second, AAC sound, with
+  its index at the front. Phones, WhatsApp, Instagram and YouTube all accept this kind.
+- It is usually faster than the video's length. On the development laptop a 2-minute video
+  took about 20 seconds; phones will be slower.
+- Size is roughly 20 MB a minute.
+- The MP4 is written by [Mediabunny](https://mediabunny.dev) (MPL-2.0 licence), using the
+  browser's own video encoder (WebCodecs). The code is in `lib/exportVideo.ts`.
+
 ## The closing card
 
 Every video, in both sections, ends with a 4-second closing card showing the Special
@@ -289,7 +304,8 @@ lib/
   storyPictures.ts         Requests pictures and voices and prepares pictures for drawing
   storyAudio.ts            Plays voice clips in step with the picture and feeds the recording
   endCard.ts               The closing QR card added to the end of every video
-  recorder.ts              MediaRecorder: MP4 where supported, otherwise WebM
+  exportVideo.ts           Builds the MP4 frame by frame (WebCodecs + Mediabunny)
+  recorder.ts              Fallback for older browsers: records the player live
   api.ts                   Browser-side fetch with timeouts and error handling
   server/                  OpenAI client, system prompts, validation, rate limit
 examples/                  The worked example
@@ -298,11 +314,10 @@ tests/                     Unit tests
 
 ## Known limits
 
-- **Recording happens in real time.** A 2-minute video takes 2 minutes to record, and the tab
-  must stay open and visible while it does.
-- **Format depends on the browser.** The app saves MP4 when the browser can record it (tested
-  in Chrome) and WebM when it cannot. Some apps, for example WhatsApp, will not play WebM; if
-  you get a WebM file, record in Chrome instead or convert it.
+- **Older browsers record live.** Browsers without the WebCodecs feature cannot build the
+  file frame by frame (see "How the video file is made"), so they record the player as it
+  plays. That takes as long as the video, needs the tab open and in front, and may save WebM
+  instead of MP4. Some apps, for example WhatsApp, will not play WebM.
 - **No sound in explainer videos** yet. Cartoon stories have voices; neither has music.
 - **Nothing is saved.** There is no database or login, so reloading the page clears your work.
   Download the storyboard `.json` to keep a copy.
@@ -315,7 +330,7 @@ tests/                     Unit tests
   the scene to its audio.
 - **Background music**: a small library of licensed tracks mixed into the recording.
 - **Server-side MP4 rendering**: render frames on the server (for example with Remotion or
-  headless Chrome plus FFmpeg) for faster exports and the same file in every browser.
+  headless Chrome plus FFmpeg) so that even browsers without WebCodecs get the same file.
 - **A third-party video model**: an optional step that turns a scene into a generated clip,
   behind the same storyboard format.
 - **One-tap posting to your own Instagram and YouTube**: needs an Instagram professional

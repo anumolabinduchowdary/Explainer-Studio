@@ -22,6 +22,8 @@ type Props = {
   notice?: string;
   /** When set, recording is not possible yet and this explains why. */
   holdReason?: string;
+  /** True when the video is being recorded live as it plays (the fallback for older browsers). */
+  live: boolean;
   /** The video's title and a suggested caption, used when sharing. */
   title: string;
   caption: string;
@@ -40,8 +42,8 @@ export function ExportPanel(props: Props) {
 
         {!format && (
           <p className="mt-2 text-ink">
-            This browser can&apos;t record video. Please open this page in a recent version of
-            Chrome, Edge, Firefox or Safari. You can still download the storyboard and prompt
+            This browser can&apos;t create video files. Please open this page in a recent version
+            of Chrome, Edge, Firefox or Safari. You can still download the storyboard and prompt
             below.
           </p>
         )}
@@ -60,7 +62,7 @@ export function ExportPanel(props: Props) {
                 <DownloadIcon />
                 Download video ({state.format.label}, {formatBytes(state.size)})
               </a>
-              <Button onClick={props.onRecord}>Record again</Button>
+              <Button onClick={props.onRecord}>Create again</Button>
             </div>
             <SharePanel
               key={state.url}
@@ -76,7 +78,9 @@ export function ExportPanel(props: Props) {
         {format && recording && (
           <div className="mt-3">
             <label htmlFor="record-progress" className="font-semibold">
-              Recording… {formatTime(state.time)} of {formatTime(duration)}
+              {props.live
+                ? `Recording… ${formatTime(state.time)} of ${formatTime(duration)}`
+                : `Creating your video… ${Math.min(100, Math.round((state.time / Math.max(duration, 0.1)) * 100))}%`}
             </label>
             <progress
               id="record-progress"
@@ -84,9 +88,13 @@ export function ExportPanel(props: Props) {
               max={duration}
               className="mt-2 block h-3 w-full overflow-hidden rounded-full accent-brand"
             />
-            <p className="mt-2 text-muted">Keep this tab open and in front until it finishes.</p>
+            <p className="mt-2 text-muted">
+              {props.live
+                ? "Keep this tab open and in front until it finishes."
+                : "Every frame is drawn one by one, so the picture never freezes. Please keep this page open until it finishes."}
+            </p>
             <Button className="mt-3" onClick={props.onCancel}>
-              Cancel recording
+              Cancel
             </Button>
           </div>
         )}
@@ -95,7 +103,7 @@ export function ExportPanel(props: Props) {
           <div className="mt-3">
             {state.status === "error" && (
               <p className="mb-3 font-semibold text-danger" role="alert">
-                The recording didn&apos;t work. Please try again.
+                The video couldn&apos;t be created. Please try again.
               </p>
             )}
             {props.notice && <p className="mb-3 rounded-xl bg-sun-soft px-3 py-2">{props.notice}</p>}
@@ -106,12 +114,12 @@ export function ExportPanel(props: Props) {
               className="w-full sm:w-auto"
             >
               <RecordIcon />
-              Record video ({format.label})
+              Create video ({format.label})
             </Button>
             {props.holdReason && <p className="mt-2 font-semibold">{props.holdReason}</p>}
             <p className="mt-2 text-muted">
-              Recording plays your video once from start to finish (about {formatTime(duration)}).
-              Keep this tab open while it records.
+              Your video is {formatTime(duration)} long. Creating it takes about that long, often
+              less, and you can watch the progress here.
             </p>
           </div>
         )}

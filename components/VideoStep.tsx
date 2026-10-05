@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { postJson, toErrorInfo } from "@/lib/api";
 import { downloadText, slugify } from "@/lib/download";
+import type { ExportJob } from "@/lib/exportVideo";
 import { useEndCardImage, withEndCard } from "@/lib/endCard";
 import type { ErrorInfo } from "@/lib/errors";
 import { assemblePrompt } from "@/lib/prompt";
@@ -36,7 +37,13 @@ export function VideoStep(props: Props) {
   const { prompt, storyboard, apiKey, onStoryboardChange } = props;
   const headingRef = useRef<HTMLHeadingElement>(null);
   const playerRef = useRef<PlayerHandle>(null);
-  const recording = useRecording(playerRef);
+  // What to build when the user asks for the file; filled in below, once the video is known.
+  const exportJob = useRef<() => ExportJob | null>(() => null);
+  const recording = useRecording(
+    playerRef,
+    undefined,
+    useCallback(async () => exportJob.current(), []),
+  );
   const { isRecording, invalidate, cancel } = recording;
 
   const [activeIndex, setActiveIndex] = useState(0);
@@ -83,6 +90,13 @@ export function VideoStep(props: Props) {
       ),
     [dims.width, dims.height, duration, draw, describe, endCardOn, endCardImage],
   );
+
+  useEffect(() => {
+    exportJob.current = () =>
+      video.draw
+        ? { width: dims.width, height: dims.height, duration: video.duration, draw: video.draw, sound: null }
+        : null;
+  });
 
   useEffect(() => {
     if (props.active) {
@@ -152,6 +166,7 @@ export function VideoStep(props: Props) {
             state={recording.state}
             duration={video.duration}
             fileBase={fileBase}
+            live={recording.live}
             title={storyboard.title}
             caption={suggestCaption({
               title: storyboard.title,

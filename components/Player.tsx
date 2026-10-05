@@ -259,7 +259,7 @@ export function Player(props: Props) {
       </div>
       <p className="mt-1 text-sm text-muted" aria-live="off">
         {sceneLabel}
-        {locked ? " · Recording, please keep this tab open" : ""}
+        {locked ? " · Creating your video" : ""}
       </p>
     </div>
   );

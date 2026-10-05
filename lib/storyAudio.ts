@@ -148,6 +148,22 @@ export class StoryAudio {
     }
   }
 
+  /**
+   * Mixes every scheduled clip into one sound track covering the whole video,
+   * for building the downloadable file. Nothing is played aloud.
+   */
+  async mixdown(schedule: ScheduledClip[], duration: number): Promise<AudioBuffer> {
+    const rate = 48_000;
+    const offline = new OfflineAudioContext(2, Math.max(1, Math.ceil(duration * rate)), rate);
+    for (const { at, clip } of schedule) {
+      const source = offline.createBufferSource();
+      source.buffer = clip.buffer;
+      source.connect(offline.destination);
+      source.start(at);
+    }
+    return offline.startRendering();
+  }
+
   /** Plays a single clip straight away, for "Listen" buttons. */
   preview(clip: Clip) {
     this.start(0, [{ at: 0, clip }]);
