@@ -3,9 +3,9 @@ import { createPostHandler } from "@/lib/server/handler";
 import { normalizePromptBuild } from "@/lib/server/normalize";
 import { generateStructured, moderate } from "@/lib/server/openai";
 import {
-  PROMPT_BUILDER_INSTRUCTIONS,
   allowsQuestions,
   buildPromptInput,
+  promptBuilderInstructions,
 } from "@/lib/server/systemPrompts";
 
 export const maxDuration = 60;
@@ -24,7 +24,7 @@ export const POST = createPostHandler({
     return generateStructured({
       client,
       name: "five_step_prompt",
-      instructions: PROMPT_BUILDER_INSTRUCTIONS,
+      instructions: promptBuilderInstructions(body.kind),
       input: buildPromptInput(body),
       schema: PromptBuildWireSchema,
       refine: (wire) => normalizePromptBuild(wire, { allowQuestions }),

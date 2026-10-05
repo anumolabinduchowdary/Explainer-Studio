@@ -72,11 +72,11 @@ export const ERROR_COPY: Record<ErrorCode, { title: string; message: string }> =
   model_unavailable: {
     title: "The AI model isn't available",
     message:
-      "The model named in OPENAI_TEXT_MODEL could not be used. Check the model name in the server settings.",
+      "A model named in the server settings could not be used. Check OPENAI_TEXT_MODEL and OPENAI_IMAGE_MODEL.",
   },
   server_misconfigured: {
     title: "The app isn't fully set up",
-    message: "OPENAI_TEXT_MODEL is not set on the server. Add it and restart the app.",
+    message: "A required setting is missing on the server. Add it, then redeploy or restart the app.",
   },
   bad_model_output: {
     title: "The AI's answer didn't come out right",

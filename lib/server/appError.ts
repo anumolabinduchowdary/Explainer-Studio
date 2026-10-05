@@ -63,6 +63,10 @@ export function toAppError(err: unknown): AppError {
     if (err.code === "model_not_found" || err.param === "model") {
       return new AppError("model_unavailable", 500);
     }
+    // The image API refuses prompts and pictures that break its content rules.
+    if (err.code === "moderation_blocked" || err.code === "content_policy_violation") {
+      return new AppError("moderation_flagged", 422);
+    }
     return new AppError("server_error", 502);
   }
   if (err instanceof APIError) {

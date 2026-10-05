@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { ErrorInfo } from "@/lib/errors";
 import { PROMPT_STEPS, assemblePrompt, type PromptStepKey } from "@/lib/prompt";
-import { FiveStepPromptSchema, LIMITS, type FiveStepPrompt } from "@/lib/schemas";
+import { FiveStepPromptSchema, LIMITS, type FiveStepPrompt, type VideoKind } from "@/lib/schemas";
 import { ErrorNotice } from "./ErrorNotice";
 import { Button, Card, CheckIcon, CopyIcon, SparkIcon, inputClass } from "./ui";
 
@@ -12,7 +12,10 @@ type Props = {
   onChange: (prompt: FiveStepPrompt) => void;
   busy: boolean;
   error: ErrorInfo | null;
-  hasStoryboard: boolean;
+  /** What step 3 makes: a storyboard (explainer) or a story (cartoon). */
+  kind: VideoKind;
+  /** True once step 3 has been generated at least once. */
+  hasResult: boolean;
   onBack: () => void;
   onGenerate: () => void;
   onUseOwnKey: () => void;
@@ -57,6 +60,7 @@ export function PromptStep(props: Props) {
   const [submitted, setSubmitted] = useState(false);
   const [copyState, setCopyState] = useState<"idle" | "copied" | "failed">("idle");
 
+  const noun = props.kind === "story" ? "story" : "storyboard";
   const errors = useMemo(() => validate(prompt), [prompt]);
   const assembled = useMemo(() => assemblePrompt(prompt), [prompt]);
 
@@ -86,7 +90,7 @@ export function PromptStep(props: Props) {
         Review your prompt
       </h1>
       <p className="mt-2 max-w-2xl text-lg text-muted">
-        The AI follows these five parts to write your storyboard. Change anything you like.
+        The AI follows these five parts to write your {noun}. Change anything you like.
       </p>
 
       <form
@@ -186,10 +190,10 @@ export function PromptStep(props: Props) {
             <Button variant="primary" type="submit" loading={busy}>
               {!busy && <SparkIcon />}
               {busy
-                ? "Writing your storyboard…"
-                : props.hasStoryboard
-                  ? "Generate a new storyboard"
-                  : "Generate storyboard"}
+                ? `Writing your ${noun}…`
+                : props.hasResult
+                  ? `Generate a new ${noun}`
+                  : `Generate ${noun}`}
             </Button>
             <Button disabled={busy} onClick={props.onBack}>
               Back

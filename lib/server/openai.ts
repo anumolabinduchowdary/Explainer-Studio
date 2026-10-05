@@ -7,8 +7,12 @@ import { AppError } from "./appError";
 /** Model names always come from the environment, never from code. */
 export function textModel(): string {
   const model = process.env.OPENAI_TEXT_MODEL?.trim();
-  if (!model) throw new AppError("server_misconfigured", 500);
+  if (!model) throw new AppError("server_misconfigured", 500, { message: missingSetting("OPENAI_TEXT_MODEL") });
   return model;
+}
+
+export function missingSetting(name: string): string {
+  return `${name} is not set on the server. Add it to the environment settings, then redeploy (or restart the app if you run it yourself).`;
 }
 
 function moderationModel(): string {
@@ -28,7 +32,7 @@ export function createClient(apiKey: string): OpenAI {
 }
 
 /** The slice of the SDK this module uses; lets tests pass in a fake. */
-export type OpenAIClient = Pick<OpenAI, "responses" | "moderations">;
+export type OpenAIClient = Pick<OpenAI, "responses" | "moderations" | "images" | "audio">;
 
 /** Runs text through OpenAI's moderation endpoint and blocks flagged input. */
 export async function moderate(

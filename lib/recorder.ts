@@ -4,14 +4,35 @@
  * otherwise WebM is used.
  */
 
-export type RecordingFormat = { mimeType: string; extension: "mp4" | "webm"; label: string };
+export type RecordingFormat = {
+  mimeType: string;
+  /** The same format with a sound track, for videos that have voices. */
+  withSound: string;
+  extension: "mp4" | "webm";
+  label: string;
+};
 
 const CANDIDATES: RecordingFormat[] = [
-  { mimeType: "video/mp4;codecs=avc1.42E01E", extension: "mp4", label: "MP4" },
-  { mimeType: "video/mp4", extension: "mp4", label: "MP4" },
-  { mimeType: "video/webm;codecs=vp9", extension: "webm", label: "WebM" },
-  { mimeType: "video/webm;codecs=vp8", extension: "webm", label: "WebM" },
-  { mimeType: "video/webm", extension: "webm", label: "WebM" },
+  {
+    mimeType: "video/mp4;codecs=avc1.42E01E",
+    withSound: "video/mp4;codecs=avc1.42E01E,mp4a.40.2",
+    extension: "mp4",
+    label: "MP4",
+  },
+  { mimeType: "video/mp4", withSound: "video/mp4", extension: "mp4", label: "MP4" },
+  {
+    mimeType: "video/webm;codecs=vp9",
+    withSound: "video/webm;codecs=vp9,opus",
+    extension: "webm",
+    label: "WebM",
+  },
+  {
+    mimeType: "video/webm;codecs=vp8",
+    withSound: "video/webm;codecs=vp8,opus",
+    extension: "webm",
+    label: "WebM",
+  },
+  { mimeType: "video/webm", withSound: "video/webm", extension: "webm", label: "WebM" },
 ];
 
 export function pickRecordingFormat(): RecordingFormat | null {
@@ -22,6 +43,13 @@ export function pickRecordingFormat(): RecordingFormat | null {
   return CANDIDATES.find((format) => MediaRecorder.isTypeSupported(format.mimeType)) ?? null;
 }
 
+/** Where an export is up to, as shown in the Download panel. */
+export type RecordingState =
+  | { status: "idle" }
+  | { status: "recording"; time: number }
+  | { status: "done"; url: string; size: number; format: RecordingFormat }
+  | { status: "error" };
+
 export type Recording = {
   format: RecordingFormat;
   /** Finishes the recording and returns the video file. */
@@ -30,26 +58,46 @@ export type Recording = {
   cancel: () => void;
 };
 
-export function startRecording(canvas: HTMLCanvasElement, fps = 30): Recording {
+/**
+ * Starts recording the canvas. Pass `sound` (an audio stream) to include a
+ * sound track; the caller keeps ownership of that stream.
+ */
+export function startRecording(
+  canvas: HTMLCanvasElement,
+  sound: MediaStream | null = null,
+  fps = 30,
+): Recording {
   const format = pickRecordingFormat();
   if (!format) throw new Error("Recording is not supported in this browser.");
 
-  const stream = canvas.captureStream(fps);
+  const picture = canvas.captureStream(fps);
+  const soundTracks = sound?.getAudioTracks() ?? [];
+  const stream =
+    soundTracks.length > 0 ? new MediaStream([...picture.getVideoTracks(), ...soundTracks]) : picture;
+  const container = format.mimeType.split(";")[0];
+  const mimeType =
+    soundTracks.length === 0
+      ? format.mimeType
+      : MediaRecorder.isTypeSupported(format.withSound)
+        ? format.withSound
+        : container;
   const recorder = new MediaRecorder(stream, {
-    mimeType: format.mimeType,
+    mimeType,
     videoBitsPerSecond: 6_000_000,
+    audioBitsPerSecond: 128_000,
   });
   const chunks: Blob[] = [];
   recorder.ondataavailable = (event) => {
     if (event.data.size > 0) chunks.push(event.data);
   };
 
-  const release = () => stream.getTracks().forEach((track) => track.stop());
+  // Only the picture is ours to stop; the sound stream belongs to the audio player.
+  const release = () => picture.getTracks().forEach((track) => track.stop());
 
   const finished = new Promise<Blob>((resolve, reject) => {
     recorder.onstop = () => {
       release();
-      resolve(new Blob(chunks, { type: format.mimeType.split(";")[0] }));
+      resolve(new Blob(chunks, { type: container }));
     };
     recorder.onerror = () => {
       release();

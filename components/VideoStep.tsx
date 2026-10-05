@@ -1,34 +1,26 @@
 "use client";
 
-import { useCallback, useEffect, useId, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { postJson, toErrorInfo } from "@/lib/api";
 import { downloadText, slugify } from "@/lib/download";
 import type { ErrorInfo } from "@/lib/errors";
 import { assemblePrompt } from "@/lib/prompt";
-import { pickRecordingFormat, startRecording, type Recording } from "@/lib/recorder";
-import { totalDuration } from "@/lib/renderer";
-import {
-  ASPECT_RATIOS,
-  LIMITS,
-  SceneResponseSchema,
-  type AspectRatio,
-  type FiveStepPrompt,
-  type Storyboard,
-} from "@/lib/schemas";
-import { ExportPanel, type RecordingState } from "./ExportPanel";
-import { Player, type PlayerHandle } from "./Player";
+import { dimensionsFor, drawFrame, locate, sceneStart, totalDuration } from "@/lib/renderer";
+import { SceneResponseSchema, type FiveStepPrompt, type Storyboard } from "@/lib/schemas";
+import { useRecording } from "@/lib/useRecording";
+import { useRenderAssets } from "@/lib/useRenderAssets";
+import { getVisual } from "@/lib/visuals";
+import { ExportPanel } from "./ExportPanel";
+import { Player, type DrawFunction, type PlayerHandle } from "./Player";
 import { SceneList } from "./SceneList";
-import { Button, inputClass } from "./ui";
-
-const SHAPE_LABELS: Record<AspectRatio, string> = {
-  "9:16": "Tall (9:16)",
-  "16:9": "Wide (16:9)",
-  "1:1": "Square (1:1)",
-};
+import { VideoDetails } from "./VideoDetails";
+import { Button } from "./ui";
 
 type Props = {
   prompt: FiveStepPrompt;
   storyboard: Storyboard;
+  /** False while another step or section is showing (this one stays mounted to keep its work). */
+  active: boolean;
   apiKey: string;
   onStoryboardChange: (update: (current: Storyboard) => Storyboard) => void;
   onBackToPrompt: () => void;
@@ -36,108 +28,64 @@ type Props = {
   onUseOwnKey: () => void;
 };
 
+/** Step 3 for explainer videos: watch, edit scenes, record and download. */
 export function VideoStep(props: Props) {
   const { prompt, storyboard, apiKey, onStoryboardChange } = props;
-  const id = useId();
   const headingRef = useRef<HTMLHeadingElement>(null);
   const playerRef = useRef<PlayerHandle>(null);
-  const recordingRef = useRef<Recording | null>(null);
-  const videoUrlRef = useRef<string | null>(null);
+  const recording = useRecording(playerRef);
+  const { isRecording, invalidate, cancel } = recording;
 
-  // This step only ever renders in the browser, after the user has acted.
-  const [format] = useState(() => pickRecordingFormat());
-  const [recording, setRecording] = useState<RecordingState>({ status: "idle" });
   const [activeIndex, setActiveIndex] = useState(0);
   const [regeneratingId, setRegeneratingId] = useState<string | null>(null);
   const [sceneError, setSceneError] = useState<{ sceneId: string; error: ErrorInfo } | null>(null);
 
-  const isRecording = recording.status === "recording";
+  const dims = dimensionsFor(storyboard.aspectRatio);
   const duration = totalDuration(storyboard);
   const fileBase = slugify(storyboard.title);
 
-  useEffect(() => {
-    headingRef.current?.focus();
-  }, []);
-
-  const releaseVideo = useCallback(() => {
-    if (videoUrlRef.current) URL.revokeObjectURL(videoUrlRef.current);
-    videoUrlRef.current = null;
-  }, []);
-
-  // Stop any recording and free the video file when leaving this step.
-  useEffect(
-    () => () => {
-      recordingRef.current?.cancel();
-      recordingRef.current = null;
-      releaseVideo();
-    },
-    [releaseVideo],
+  const storyboardText = useMemo(
+    () =>
+      storyboard.scenes.flatMap((scene) => [scene.heading, scene.body, ...scene.bullets]).join(" "),
+    [storyboard],
   );
+  const assets = useRenderAssets(storyboardText);
+
+  const draw = useMemo<DrawFunction | null>(
+    () => (assets ? (ctx, time, options) => drawFrame(ctx, storyboard, time, assets, options) : null),
+    [storyboard, assets],
+  );
+  const describe = useCallback(
+    (time: number) => {
+      const { index } = locate(storyboard, time);
+      const scene = storyboard.scenes[index];
+      return {
+        index,
+        count: storyboard.scenes.length,
+        text: `${scene.heading}. ${scene.body} ${scene.bullets.join(". ")} Picture: ${getVisual(scene.visual).alt}.`,
+      };
+    },
+    [storyboard],
+  );
+  const startOfScene = useCallback((index: number) => sceneStart(storyboard, index), [storyboard]);
+
+  useEffect(() => {
+    if (props.active) {
+      headingRef.current?.focus();
+    } else {
+      cancel();
+      playerRef.current?.pause();
+    }
+  }, [props.active, cancel]);
 
   /** Any edit makes an already recorded video out of date. */
   const changeStoryboard = useCallback(
     (update: (current: Storyboard) => Storyboard) => {
       onStoryboardChange(update);
-      setRecording((state) => {
-        if (state.status !== "done") return state;
-        releaseVideo();
-        return { status: "idle" };
-      });
+      invalidate();
     },
-    [onStoryboardChange, releaseVideo],
+    [onStoryboardChange, invalidate],
   );
-
-  const startRecord = () => {
-    const player = playerRef.current;
-    const canvas = player?.getCanvas();
-    if (!player || !canvas) return;
-    releaseVideo();
-    player.pause();
-    player.seek(0);
-    setRecording({ status: "recording", time: 0 });
-    // Give the first frame a moment to paint before the recorder starts.
-    requestAnimationFrame(() =>
-      requestAnimationFrame(() => {
-        try {
-          recordingRef.current = startRecording(canvas);
-          player.play();
-        } catch {
-          setRecording({ status: "error" });
-        }
-      }),
-    );
-  };
-
-  const cancelRecord = () => {
-    recordingRef.current?.cancel();
-    recordingRef.current = null;
-    playerRef.current?.pause();
-    setRecording({ status: "idle" });
-  };
-
-  const handleEnded = useCallback(() => {
-    const active = recordingRef.current;
-    if (!active) return;
-    recordingRef.current = null;
-    // Hold the last frame briefly so it is included in the file.
-    setTimeout(async () => {
-      try {
-        const blob = await active.stop();
-        if (blob.size === 0) throw new Error("Empty recording");
-        const url = URL.createObjectURL(blob);
-        videoUrlRef.current = url;
-        setRecording({ status: "done", url, size: blob.size, format: active.format });
-      } catch {
-        setRecording({ status: "error" });
-      }
-    }, 400);
-  }, []);
-
-  const handleProgress = useCallback((time: number) => {
-    setRecording((state) =>
-      state.status === "recording" && state.time !== time ? { status: "recording", time } : state,
-    );
-  }, []);
 
   const regenerate = async (sceneId: string, instruction: string) => {
     setRegeneratingId(sceneId);
@@ -173,19 +121,24 @@ export function VideoStep(props: Props) {
         <div className="min-w-0 space-y-4 lg:sticky lg:top-4">
           <Player
             ref={playerRef}
-            storyboard={storyboard}
+            width={dims.width}
+            height={dims.height}
+            duration={duration}
+            draw={draw}
+            describe={describe}
+            sceneStart={startOfScene}
             locked={isRecording}
-            onEnded={handleEnded}
+            onEnded={recording.handleEnded}
             onSceneChange={setActiveIndex}
-            onProgress={handleProgress}
+            onProgress={recording.handleProgress}
           />
           <ExportPanel
-            format={format}
-            state={recording}
+            format={recording.format}
+            state={recording.state}
             duration={duration}
             fileBase={fileBase}
-            onRecord={startRecord}
-            onCancel={cancelRecord}
+            onRecord={recording.start}
+            onCancel={recording.cancel}
             onDownloadStoryboard={() =>
               downloadText(
                 `${fileBase}.storyboard.json`,
@@ -200,46 +153,15 @@ export function VideoStep(props: Props) {
         </div>
 
         <div className="min-w-0 space-y-6">
-          <fieldset disabled={isRecording} className="min-w-0 space-y-4 disabled:opacity-60">
-            <legend className="sr-only">Video details</legend>
-            <div>
-              <label htmlFor={`${id}-title`} className="mb-1 block font-semibold">
-                Video title
-              </label>
-              <input
-                id={`${id}-title`}
-                type="text"
-                value={storyboard.title}
-                maxLength={LIMITS.title}
-                onChange={(event) =>
-                  changeStoryboard((current) => ({ ...current, title: event.target.value }))
-                }
-                className={inputClass}
-              />
-            </div>
-            <fieldset>
-              <legend className="mb-1 font-semibold">Shape</legend>
-              <div className="flex flex-wrap gap-2">
-                {ASPECT_RATIOS.map((ratio) => (
-                  <label key={ratio} className="cursor-pointer">
-                    <input
-                      type="radio"
-                      name={`${id}-shape`}
-                      value={ratio}
-                      checked={storyboard.aspectRatio === ratio}
-                      onChange={() =>
-                        changeStoryboard((current) => ({ ...current, aspectRatio: ratio }))
-                      }
-                      className="peer sr-only"
-                    />
-                    <span className="inline-flex min-h-11 items-center rounded-xl border border-line bg-surface px-4 font-semibold transition-colors duration-200 hover:border-brand peer-checked:border-brand peer-checked:bg-brand-soft peer-checked:text-brand-strong peer-focus-visible:outline-3 peer-focus-visible:outline-offset-2 peer-focus-visible:outline-brand">
-                      {SHAPE_LABELS[ratio]}
-                    </span>
-                  </label>
-                ))}
-              </div>
-            </fieldset>
-          </fieldset>
+          <VideoDetails
+            title={storyboard.title}
+            aspectRatio={storyboard.aspectRatio}
+            disabled={isRecording}
+            onTitleChange={(title) => changeStoryboard((current) => ({ ...current, title }))}
+            onAspectRatioChange={(aspectRatio) =>
+              changeStoryboard((current) => ({ ...current, aspectRatio }))
+            }
+          />
 
           <SceneList
             storyboard={storyboard}

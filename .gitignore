@@ -43,3 +43,6 @@ next-env.d.ts
 
 # local Claude Code preview settings (machine-specific)
 /.claude/
+
+# reference videos (not ours to publish)
+*.mov

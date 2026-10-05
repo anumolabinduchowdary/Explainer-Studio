@@ -6,9 +6,9 @@ import { AppError, describeForLog, toAppError } from "./appError";
 import { createClient, type OpenAIClient } from "./openai";
 import { clientIp, rateLimit, requestsPerMinute } from "./rateLimit";
 
-const MAX_BODY_CHARS = 100_000;
+const DEFAULT_MAX_BODY_CHARS = 100_000;
 /** Kept under the routes' maxDuration (60s) so we can answer before the platform cuts us off. */
-const DEADLINE_MS = 55_000;
+const DEFAULT_DEADLINE_MS = 55_000;
 
 type Context<Body> = {
   body: Body;
@@ -23,6 +23,11 @@ type HandlerConfig<Schema extends z.ZodType> = {
   run: (context: Context<z.infer<Schema>>) => Promise<object>;
   /** Tests can inject a fake OpenAI client. */
   clientFactory?: (apiKey: string) => OpenAIClient;
+  /** Routes that share a name share one per-IP allowance. Default: "text". */
+  rateLimit?: { bucket: string; perMinute: () => number };
+  /** How long the route may run. Must stay under its `maxDuration`. */
+  deadlineMs?: number;
+  maxBodyChars?: number;
 };
 
 /**
@@ -32,15 +37,20 @@ type HandlerConfig<Schema extends z.ZodType> = {
 export function createPostHandler<Schema extends z.ZodType>(config: HandlerConfig<Schema>) {
   return async function POST(req: Request): Promise<Response> {
     try {
-      const limit = rateLimit(clientIp(req), requestsPerMinute(), 60_000);
+      const bucket = config.rateLimit?.bucket ?? "text";
+      const perMinute = (config.rateLimit?.perMinute ?? requestsPerMinute)();
+      const limit = rateLimit(`${bucket}:${clientIp(req)}`, perMinute, 60_000);
       if (!limit.ok) {
         throw new AppError("rate_limited", 429, { retryAfterSec: limit.retryAfterSec });
       }
 
-      const body = await readBody(req, config.schema);
+      const body = await readBody(req, config.schema, config.maxBodyChars ?? DEFAULT_MAX_BODY_CHARS);
       const apiKey = resolveApiKey(req);
       const client = (config.clientFactory ?? createClient)(apiKey);
-      const signal = AbortSignal.any([req.signal, AbortSignal.timeout(DEADLINE_MS)]);
+      const signal = AbortSignal.any([
+        req.signal,
+        AbortSignal.timeout(config.deadlineMs ?? DEFAULT_DEADLINE_MS),
+      ]);
 
       const result = await config.run({ body, client, signal });
       return Response.json(result, { headers: { "Cache-Control": "no-store" } });
@@ -66,9 +76,10 @@ export function createPostHandler<Schema extends z.ZodType>(config: HandlerConfi
 async function readBody<Schema extends z.ZodType>(
   req: Request,
   schema: Schema,
+  maxChars: number,
 ): Promise<z.infer<Schema>> {
   const raw = await req.text();
-  if (raw.length > MAX_BODY_CHARS) {
+  if (raw.length > maxChars) {
     throw new AppError("invalid_input", 413, { message: "That request is too large." });
   }
   let json: unknown;

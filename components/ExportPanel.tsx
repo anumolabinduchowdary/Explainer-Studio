@@ -1,15 +1,9 @@
 "use client";
 
 import { formatBytes } from "@/lib/download";
-import type { RecordingFormat } from "@/lib/recorder";
+import type { RecordingFormat, RecordingState } from "@/lib/recorder";
 import { formatTime } from "@/lib/renderer";
 import { Button, Card, DownloadIcon, RecordIcon } from "./ui";
-
-export type RecordingState =
-  | { status: "idle" }
-  | { status: "recording"; time: number }
-  | { status: "done"; url: string; size: number; format: RecordingFormat }
-  | { status: "error" };
 
 type Props = {
   /** Null when this browser cannot record a canvas. */
@@ -21,6 +15,12 @@ type Props = {
   onCancel: () => void;
   onDownloadStoryboard: () => void;
   onDownloadPrompt: () => void;
+  /** Label for the script download, e.g. "Storyboard (.json)". */
+  scriptLabel?: string;
+  /** Shown above the record button, e.g. when pictures are still missing. */
+  notice?: string;
+  /** When set, recording is not possible yet and this explains why. */
+  holdReason?: string;
 };
 
 export function ExportPanel(props: Props) {
@@ -86,10 +86,17 @@ export function ExportPanel(props: Props) {
                 The recording didn&apos;t work. Please try again.
               </p>
             )}
-            <Button variant="primary" onClick={props.onRecord} className="w-full sm:w-auto">
+            {props.notice && <p className="mb-3 rounded-xl bg-sun-soft px-3 py-2">{props.notice}</p>}
+            <Button
+              variant="primary"
+              onClick={props.onRecord}
+              disabled={Boolean(props.holdReason)}
+              className="w-full sm:w-auto"
+            >
               <RecordIcon />
               Record video ({format.label})
             </Button>
+            {props.holdReason && <p className="mt-2 font-semibold">{props.holdReason}</p>}
             <p className="mt-2 text-muted">
               Recording plays your video once from start to finish (about {formatTime(duration)}).
               Keep this tab open while it records.
@@ -102,7 +109,7 @@ export function ExportPanel(props: Props) {
           <div className="mt-2 flex flex-wrap gap-2">
             <Button compact disabled={recording} onClick={props.onDownloadStoryboard}>
               <DownloadIcon />
-              Storyboard (.json)
+              {props.scriptLabel ?? "Storyboard (.json)"}
             </Button>
             <Button compact disabled={recording} onClick={props.onDownloadPrompt}>
               <DownloadIcon />

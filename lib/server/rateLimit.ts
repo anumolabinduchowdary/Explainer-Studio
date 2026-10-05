@@ -61,6 +61,18 @@ export function requestsPerMinute(): number {
   return Number.isFinite(parsed) && parsed >= 1 ? Math.floor(parsed) : 10;
 }
 
+/** Pictures cost more than text, so they have their own allowance. */
+export function imagesPerMinute(): number {
+  const parsed = Number(process.env.RATE_LIMIT_IMAGES_PER_MINUTE);
+  return Number.isFinite(parsed) && parsed >= 1 ? Math.floor(parsed) : 12;
+}
+
+/** One request per spoken line; a story has a dozen or more. */
+export function speechPerMinute(): number {
+  const parsed = Number(process.env.RATE_LIMIT_SPEECH_PER_MINUTE);
+  return Number.isFinite(parsed) && parsed >= 1 ? Math.floor(parsed) : 60;
+}
+
 /** Test helper. */
 export function resetRateLimits() {
   buckets.clear();

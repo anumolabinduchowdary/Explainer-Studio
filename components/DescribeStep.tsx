@@ -3,8 +3,9 @@
 import { useEffect, useId, useRef, useState } from "react";
 import type { ErrorInfo } from "@/lib/errors";
 import { EXAMPLES } from "@/lib/sample";
-import { LIMITS } from "@/lib/schemas";
+import { LIMITS, type VideoKind } from "@/lib/schemas";
 import { ErrorNotice } from "./ErrorNotice";
+import { SpeakButton } from "./SpeakButton";
 import { Button, Card, SparkIcon, inputClass } from "./ui";
 
 export type BuildOptions = {
@@ -12,13 +13,35 @@ export type BuildOptions = {
   skipQuestions?: boolean;
 };
 
+const COPY: Record<VideoKind, { title: string; help: string; placeholder: string; sample: string; sampleNote: string }> = {
+  explainer: {
+    title: "Describe your video",
+    help: "Say what it is about, who it is for and how it should feel. One or two sentences is enough.",
+    placeholder:
+      "e.g. A 60-second video for new parents about why tummy time matters, gentle and encouraging.",
+    sample: "Open a ready-made example video",
+    sampleNote: "(no key needed).",
+  },
+  story: {
+    title: "Describe your cartoon story",
+    help: "Say what it is about, who it is for and who should appear in it. The AI writes the dialogue and draws the characters.",
+    placeholder:
+      "e.g. A 45-second cartoon where a kind therapist shows a father three simple exercises to do with his daughter at home.",
+    sample: "Open a ready-made example story",
+    sampleNote: "(no key needed; the pictures are only drawn with a key).",
+  },
+};
+
 type Props = {
+  kind: VideoKind;
   description: string;
   onDescriptionChange: (value: string) => void;
   /** Clarifying questions from the AI, if it needs more detail. */
   questions: string[];
   busy: boolean;
   error: ErrorInfo | null;
+  /** "Use my own key" mode, needed here for speech-to-text. */
+  apiKey: string;
   focusHeading: boolean;
   onBuild: (options?: BuildOptions) => void;
   onRetry: () => void;
@@ -29,6 +52,7 @@ type Props = {
 export function DescribeStep(props: Props) {
   const { description, onDescriptionChange, questions, busy, error } = props;
   const fieldId = useId();
+  const copy = COPY[props.kind];
   const headingRef = useRef<HTMLHeadingElement>(null);
   const [showLengthError, setShowLengthError] = useState(false);
   const tooShort = description.trim().length < LIMITS.descriptionMin;
@@ -52,10 +76,10 @@ export function DescribeStep(props: Props) {
   return (
     <div className="mx-auto max-w-2xl">
       <h1 ref={headingRef} tabIndex={-1} className="font-display text-3xl font-bold sm:text-4xl">
-        <label htmlFor={fieldId}>Describe your video</label>
+        <label htmlFor={fieldId}>{copy.title}</label>
       </h1>
       <p id={`${fieldId}-help`} className="mt-2 text-lg text-muted">
-        Say what it is about, who it is for and how it should feel. One or two sentences is enough.
+        {copy.help}
       </p>
 
       <form
@@ -77,7 +101,7 @@ export function DescribeStep(props: Props) {
           maxLength={LIMITS.description}
           aria-describedby={`${fieldId}-help ${fieldId}-count${showLengthError ? ` ${fieldId}-error` : ""}`}
           aria-invalid={showLengthError || undefined}
-          placeholder="e.g. A 60-second video for new parents about why tummy time matters, gentle and encouraging."
+          placeholder={copy.placeholder}
           className={`${inputClass} field-sizing-content max-h-96 min-h-36 resize-y p-4 text-lg leading-relaxed shadow-sm`}
         />
         <div className="mt-1 flex items-start justify-between gap-3 text-sm">
@@ -89,12 +113,27 @@ export function DescribeStep(props: Props) {
           </p>
         </div>
 
-        <div className="mt-3">
+        <div className="mt-2">
+          <SpeakButton
+            apiKey={props.apiKey}
+            disabled={busy}
+            onUseOwnKey={props.onUseOwnKey}
+            onText={(spoken) => {
+              // Spoken words are added after anything already typed.
+              const joined = description.trim() ? `${description.trimEnd()} ${spoken}` : spoken;
+              onDescriptionChange(joined.slice(0, LIMITS.description));
+              setShowLengthError(false);
+              document.getElementById(fieldId)?.focus();
+            }}
+          />
+        </div>
+
+        <div className="mt-4">
           <p className="mb-2 font-semibold" id={`${fieldId}-examples`}>
             Or start from an example:
           </p>
           <ul className="flex flex-wrap gap-2" aria-labelledby={`${fieldId}-examples`}>
-            {EXAMPLES.map((example) => (
+            {EXAMPLES[props.kind].map((example) => (
               <li key={example.label}>
                 <button
                   type="button"
@@ -151,9 +190,9 @@ export function DescribeStep(props: Props) {
           onClick={props.onLoadSample}
           className="min-h-11 rounded font-semibold text-brand-strong underline underline-offset-4 hover:text-brand"
         >
-          Open a ready-made example video
+          {copy.sample}
         </button>{" "}
-        (no key needed).
+        {copy.sampleNote}
       </p>
     </div>
   );

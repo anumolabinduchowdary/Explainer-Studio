@@ -2,6 +2,9 @@ import { z } from "zod";
 import { VISUAL_IDS } from "./visuals";
 
 export const ASPECT_RATIOS = ["9:16", "16:9", "1:1"] as const;
+/** The two sections of the app: text-and-picture explainers, and cartoon stories. */
+export const VIDEO_KINDS = ["explainer", "story"] as const;
+export type VideoKind = (typeof VIDEO_KINDS)[number];
 export const TRANSITIONS = ["fade", "slide-left", "slide-up", "zoom"] as const;
 
 export const LIMITS = {
@@ -130,6 +133,7 @@ export const BuildPromptRequestSchema = z.object({
     .max(3)
     .optional(),
   skipQuestions: z.boolean().optional(),
+  kind: z.enum(VIDEO_KINDS).optional(),
 });
 export type BuildPromptRequest = z.infer<typeof BuildPromptRequestSchema>;
 
@@ -158,3 +162,22 @@ export type SceneRequest = z.infer<typeof SceneRequestSchema>;
 
 export const SceneResponseSchema = z.object({ scene: SceneSchema });
 export type SceneResponse = z.infer<typeof SceneResponseSchema>;
+
+/* ------------------------------------------------------------------ */
+/* Speaking instead of typing                                          */
+/* ------------------------------------------------------------------ */
+
+/** Largest recording accepted, as a base64 data URL (about 2 MB of sound). */
+export const MAX_AUDIO_CHARS = 3_000_000;
+
+export const TranscribeRequestSchema = z.object({
+  audio: z
+    .string()
+    .max(MAX_AUDIO_CHARS, "That recording is too long. Please keep it under a minute.")
+    .regex(
+      /^data:audio\/(webm|mp4|m4a|x-m4a|mpeg|wav|ogg)(;[a-z0-9=.,-]+)*;base64,[A-Za-z0-9+/=]+$/i,
+      "That recording could not be read.",
+    ),
+});
+
+export const TranscribeResponseSchema = z.object({ text: z.string() });

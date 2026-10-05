@@ -1,0 +1,101 @@
+{
+  "title": "Understanding Cerebral Palsy",
+  "aspectRatio": "9:16",
+  "artStyle": "2D cartoon for a friendly educational video: bold dark outlines, flat bright colours with simple cel shading, rounded shapes and big expressive eyes",
+  "narratorVoice": "alloy",
+  "characters": [
+    {
+      "id": "c1",
+      "name": "Dr. Asha",
+      "look": "A friendly Indian woman doctor in her forties with brown skin, black hair in a low bun and round glasses, wearing a white coat over a teal kurta, with a stethoscope around her neck.",
+      "size": "large",
+      "voice": "sage",
+      "voiceStyle": "A calm, reassuring doctor in her forties, kind and unhurried"
+    },
+    {
+      "id": "c2",
+      "name": "Meera",
+      "look": "An Indian mother in her thirties with warm brown skin and a long black plait, wearing a mustard yellow salwar kameez with a pink dupatta.",
+      "size": "large",
+      "voice": "coral",
+      "voiceStyle": "A caring mother in her thirties, worried at first, then relieved"
+    },
+    {
+      "id": "c3",
+      "name": "Aarav",
+      "look": "A cheerful six-year-old Indian boy with brown skin and short black hair, wearing a red T-shirt and blue shorts, standing with a small blue children's walker that he holds with both hands.",
+      "size": "small",
+      "voice": "verse",
+      "voiceStyle": "A cheerful six-year-old boy, bright, quick and proud"
+    }
+  ],
+  "locations": [
+    {
+      "id": "l1",
+      "name": "Home",
+      "look": "A cosy living room in an Indian home with a sofa, a window with curtains and a patterned rug."
+    },
+    {
+      "id": "l2",
+      "name": "Clinic",
+      "look": "A bright children's clinic room with a desk, a height chart on the wall and a potted plant."
+    },
+    {
+      "id": "l3",
+      "name": "Park",
+      "look": "A sunny neighbourhood park with green grass, trees, a path and a blue sky with soft clouds."
+    }
+  ],
+  "scenes": [
+    {
+      "id": "s1",
+      "locationId": "l1",
+      "onStage": ["c2", "c3"],
+      "lines": [
+        { "speaker": "narrator", "text": "Meera has just heard two new words: cerebral palsy." },
+        { "speaker": "c2", "text": "What does this mean for my son?" }
+      ]
+    },
+    {
+      "id": "s2",
+      "locationId": "l2",
+      "onStage": ["c1", "c2"],
+      "lines": [
+        { "speaker": "c1", "text": "Cerebral palsy, or CP, affects how a child moves and balances." },
+        { "speaker": "c1", "text": "It begins in the developing brain, before or around birth." },
+        { "speaker": "c2", "text": "Did I do something wrong?" },
+        { "speaker": "c1", "text": "No. It is nobody's fault, and it is not contagious." }
+      ]
+    },
+    {
+      "id": "s3",
+      "locationId": "l2",
+      "onStage": ["c1", "c3", "c2"],
+      "lines": [
+        { "speaker": "c1", "text": "Every child with CP is different." },
+        { "speaker": "c1", "text": "Some walk on their own. Some use a walker or a wheelchair." },
+        { "speaker": "c3", "text": "My walker helps me go where I want!" }
+      ]
+    },
+    {
+      "id": "s4",
+      "locationId": "l2",
+      "onStage": ["c1", "c3"],
+      "lines": [
+        { "speaker": "c1", "text": "Starting therapy early helps children build strength and skills." },
+        { "speaker": "c3", "text": "I practise every day. Watch me!" }
+      ]
+    },
+    {
+      "id": "s5",
+      "locationId": "l3",
+      "onStage": ["c2", "c3"],
+      "lines": [
+        { "speaker": "c2", "text": "He goes to school, plays and makes friends." },
+        { "speaker": "c3", "text": "And I love cricket!" },
+        { "speaker": "narrator", "text": "With love and support, every child can shine." },
+        { "speaker": "narrator", "text": "For awareness, not medical advice." }
+      ]
+    }
+  ]
+}
