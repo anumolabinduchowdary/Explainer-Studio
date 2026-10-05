@@ -99,6 +99,7 @@ export function Player(props: Props) {
     let last = performance.now();
     let lastUiUpdate = 0;
     let lastIndex = -1;
+    let lastText = "";
 
     const tick = (now: number) => {
       const live = liveRef.current;
@@ -123,9 +124,10 @@ export function Player(props: Props) {
         live.draw(ctx, timeRef.current, { scratch: scratchRef.current, settled });
 
         const moment = live.describe(timeRef.current);
-        if (moment.index !== lastIndex || refreshInfoRef.current) {
+        if (moment.index !== lastIndex || moment.text !== lastText || refreshInfoRef.current) {
           if (moment.index !== lastIndex) live.onSceneChange?.(moment.index);
           lastIndex = moment.index;
+          lastText = moment.text;
           refreshInfoRef.current = false;
           setInfo(moment);
         }

@@ -14,8 +14,11 @@ type Props = {
   title: string;
   aspectRatio: AspectRatio;
   disabled: boolean;
+  /** Whether the video ends with the Instagram QR card. Null hides the switch (no card picture). */
+  endCard: boolean | null;
   onTitleChange: (title: string) => void;
   onAspectRatioChange: (aspectRatio: AspectRatio) => void;
+  onEndCardChange: (on: boolean) => void;
 };
 
 /** The title and shape controls shared by both kinds of video. */
@@ -57,6 +60,17 @@ export function VideoDetails(props: Props) {
           ))}
         </div>
       </fieldset>
+      {props.endCard !== null && (
+        <label className="flex min-h-11 cursor-pointer items-center gap-2">
+          <input
+            type="checkbox"
+            checked={props.endCard}
+            onChange={(event) => props.onEndCardChange(event.target.checked)}
+            className="size-5 accent-brand"
+          />
+          End with our Instagram QR code
+        </label>
+      )}
     </fieldset>
   );
 }

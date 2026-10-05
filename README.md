@@ -153,6 +153,15 @@ Good to know:
 - Error messages from OpenAI are never passed through to users or logs, because they can
   repeat part of a key.
 
+## The closing card
+
+Every video, in both sections, ends with a 4-second closing card showing the Special
+Parenting Instagram QR code. It is on by default; untick **End with our Instagram QR code**
+on the video screen to leave it off for one video.
+
+To use a different picture, replace `public/end-card.webp` (any image works). The length and
+the screen-reader description are set in `lib/endCard.ts`.
+
 ## Speaking instead of typing
 
 Both Describe screens have a **Speak instead of typing** button. It records up to a minute
@@ -254,6 +263,7 @@ lib/
   storyRenderer.ts         Draws any moment of a cartoon story on a canvas
   storyPictures.ts         Requests pictures and voices and prepares pictures for drawing
   storyAudio.ts            Plays voice clips in step with the picture and feeds the recording
+  endCard.ts               The closing QR card added to the end of every video
   recorder.ts              MediaRecorder: MP4 where supported, otherwise WebM
   api.ts                   Browser-side fetch with timeouts and error handling
   server/                  OpenAI client, system prompts, validation, rate limit

@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { postJson, toErrorInfo } from "@/lib/api";
 import { downloadText, slugify } from "@/lib/download";
+import { useEndCardImage, withEndCard } from "@/lib/endCard";
 import type { ErrorInfo } from "@/lib/errors";
 import { assemblePrompt } from "@/lib/prompt";
 import { dimensionsFor, drawFrame, locate, sceneStart, totalDuration } from "@/lib/renderer";
@@ -69,6 +70,18 @@ export function VideoStep(props: Props) {
   );
   const startOfScene = useCallback((index: number) => sceneStart(storyboard, index), [storyboard]);
 
+  // Every video closes with the Instagram QR card unless it is switched off.
+  const endCardImage = useEndCardImage();
+  const [endCardOn, setEndCardOn] = useState(true);
+  const video = useMemo(
+    () =>
+      withEndCard(
+        { dims: { width: dims.width, height: dims.height }, duration, draw, describe },
+        endCardOn ? endCardImage : null,
+      ),
+    [dims.width, dims.height, duration, draw, describe, endCardOn, endCardImage],
+  );
+
   useEffect(() => {
     if (props.active) {
       headingRef.current?.focus();
@@ -123,9 +136,9 @@ export function VideoStep(props: Props) {
             ref={playerRef}
             width={dims.width}
             height={dims.height}
-            duration={duration}
-            draw={draw}
-            describe={describe}
+            duration={video.duration}
+            draw={video.draw}
+            describe={video.describe}
             sceneStart={startOfScene}
             locked={isRecording}
             onEnded={recording.handleEnded}
@@ -135,7 +148,7 @@ export function VideoStep(props: Props) {
           <ExportPanel
             format={recording.format}
             state={recording.state}
-            duration={duration}
+            duration={video.duration}
             fileBase={fileBase}
             onRecord={recording.start}
             onCancel={recording.cancel}
@@ -157,6 +170,11 @@ export function VideoStep(props: Props) {
             title={storyboard.title}
             aspectRatio={storyboard.aspectRatio}
             disabled={isRecording}
+            endCard={endCardImage ? endCardOn : null}
+            onEndCardChange={(on) => {
+              setEndCardOn(on);
+              invalidate();
+            }}
             onTitleChange={(title) => changeStoryboard((current) => ({ ...current, title }))}
             onAspectRatioChange={(aspectRatio) =>
               changeStoryboard((current) => ({ ...current, aspectRatio }))
