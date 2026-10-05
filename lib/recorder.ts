@@ -47,7 +47,7 @@ export function pickRecordingFormat(): RecordingFormat | null {
 export type RecordingState =
   | { status: "idle" }
   | { status: "recording"; time: number }
-  | { status: "done"; url: string; size: number; format: RecordingFormat }
+  | { status: "done"; url: string; size: number; format: RecordingFormat; video: Blob }
   | { status: "error" };
 
 export type Recording = {

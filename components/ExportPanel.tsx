@@ -3,6 +3,7 @@
 import { formatBytes } from "@/lib/download";
 import type { RecordingFormat, RecordingState } from "@/lib/recorder";
 import { formatTime } from "@/lib/renderer";
+import { SharePanel } from "./SharePanel";
 import { Button, Card, DownloadIcon, RecordIcon } from "./ui";
 
 type Props = {
@@ -21,6 +22,9 @@ type Props = {
   notice?: string;
   /** When set, recording is not possible yet and this explains why. */
   holdReason?: string;
+  /** The video's title and a suggested caption, used when sharing. */
+  title: string;
+  caption: string;
 };
 
 export function ExportPanel(props: Props) {
@@ -58,6 +62,14 @@ export function ExportPanel(props: Props) {
               </a>
               <Button onClick={props.onRecord}>Record again</Button>
             </div>
+            <SharePanel
+              key={state.url}
+              video={state.video}
+              format={state.format}
+              fileBase={props.fileBase}
+              title={props.title}
+              defaultCaption={props.caption}
+            />
           </div>
         )}
 

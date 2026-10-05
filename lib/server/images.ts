@@ -63,6 +63,15 @@ export function imagePrompt(request: ImageRequest): string {
         "Keep the background transparent.",
         NO_EXTRAS,
       ].join(" ");
+    case "gesture":
+      return [
+        `This is a cartoon character for an animation: ${request.look}`,
+        "Redraw exactly the same character: the same drawing style, face, hair, clothes, colours, outline and size, standing in the same place with the feet where they are now.",
+        "Change the arms only: the character lifts one hand to about chest height with an open palm, the way people do when explaining something in conversation.",
+        "If the character holds or uses a walker, wheelchair, cane or any other aid, keep it exactly as it is and keep a hand on it; gesture with the free hand only. If the character has no arms, tilt the body slightly instead.",
+        "The mouth stays closed in a gentle smile. Keep the background transparent.",
+        NO_EXTRAS,
+      ].join(" ");
     case "background":
       return [
         `Art style: ${style}.`,
@@ -92,7 +101,7 @@ export async function generatePicture(
   };
 
   let result;
-  if (request.kind === "talking") {
+  if (request.kind === "talking" || request.kind === "gesture") {
     const base64 = request.reference?.split(",")[1] ?? "";
     const reference = await toFile(Buffer.from(base64, "base64"), "character.png", {
       type: "image/png",

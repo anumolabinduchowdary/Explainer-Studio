@@ -68,13 +68,30 @@ export async function loadSprite(dataUrl: string, trimTransparent: boolean): Pro
   if (right < left || bottom < top) return full;
   const width = right - left + 1;
   const height = bottom - top + 1;
-  if (width === full.width && height === full.height) return full;
+  // Where the feet are: the middle of whatever is drawn in the lowest strip.
+  let feetSum = 0;
+  let feetCount = 0;
+  for (let y = Math.max(top, bottom - Math.ceil(height * 0.06)); y <= bottom; y++) {
+    for (let x = left; x <= right; x++) {
+      if (data[(y * full.width + x) * 4 + 3] > 24) {
+        feetSum += x - left;
+        feetCount++;
+      }
+    }
+  }
+  const feetX = feetCount > 0 ? feetSum / feetCount : width / 2;
 
   const cropped = document.createElement("canvas");
   cropped.width = width;
   cropped.height = height;
   cropped.getContext("2d")?.drawImage(canvas, left, top, width, height, 0, 0, width, height);
-  return { source: cropped, width, height, previewUrl: cropped.toDataURL("image/webp", 0.85) };
+  return {
+    source: cropped,
+    width,
+    height,
+    feetX,
+    previewUrl: cropped.toDataURL("image/webp", 0.85),
+  };
 }
 
 /** Re-encodes a picture as a PNG data URL small enough to send as a reference. */

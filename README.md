@@ -63,7 +63,7 @@ the download with the built-in example.
 | `OPENAI_TRANSCRIBE_MODEL` | For speaking | The speech-to-text model behind "Speak instead of typing", for example `gpt-transcribe`. |
 | `OPENAI_MODERATION_MODEL` | No | Defaults to `omni-moderation-latest`. |
 | `RATE_LIMIT_PER_MINUTE` | No | Text requests allowed per IP address per minute. Default `10`. |
-| `RATE_LIMIT_IMAGES_PER_MINUTE` | No | Pictures allowed per IP address per minute. Default `12`. |
+| `RATE_LIMIT_IMAGES_PER_MINUTE` | No | Pictures allowed per IP address per minute. Default `24`. |
 | `RATE_LIMIT_SPEECH_PER_MINUTE` | No | Spoken lines allowed per IP address per minute. Default `60`. |
 
 ### Commands
@@ -94,8 +94,12 @@ A cartoon story is a short conversation between up to four characters, in up to 
 
 Things to know:
 
-- **Cost**: each character needs 2 pictures and each background 1, so a typical story with
-  3 characters and 3 places is 9 pictures. Nothing is drawn until you click the button. See
+- **Hand gestures**: with "Hand gestures while talking" ticked (the default), each character
+  is drawn a second time with a hand raised, and switches to that pose now and then while
+  speaking. Untick it for the whole story, or per character, if a gesture drawing looks wrong.
+- **Cost**: each character needs 4 pictures with gestures (2 without) and each background 1,
+  so a typical story with 3 characters and 3 places is 15 pictures (9 without gestures).
+  Nothing is drawn until you click the button. See
   [OpenAI's pricing](https://openai.com/api/pricing/) for the cost per picture.
 - **Check every picture.** AI drawings can get details wrong, for example hands or the shape
   of a wheelchair or walker. Edit the description and redraw until it is right.
@@ -152,6 +156,21 @@ Good to know:
   on `localhost`).
 - Error messages from OpenAI are never passed through to users or logs, because they can
   repeat part of a key.
+
+## Sharing to Instagram, YouTube and other apps
+
+When a video has been recorded, the Download panel shows a **Share** section:
+
+- A suggested caption (the title, the health disclaimer and AI-voice statement where they
+  apply, and the account to follow). Edit it, or press **Copy caption**.
+- On a phone, **Share to Instagram, YouTube…** opens the phone's own share menu with the
+  video attached. Choose the app, paste the caption and post. The caption is copied
+  automatically because most apps ignore text sent along with a video.
+- On a computer the share menu rarely lists those apps, so download the video and upload it.
+
+This uses the browser's built-in sharing, so the app never holds anyone's Instagram or
+YouTube login. Posting with no taps at all would need Meta's and Google's publishing
+programmes: see "Next steps".
 
 ## The closing card
 
@@ -253,6 +272,7 @@ components/
   Player.tsx               Canvas player and controls (shared by both sections)
   SceneList.tsx            Edit, reorder, delete, rewrite scenes
   ExportPanel.tsx          Video, .json and .txt downloads
+  SharePanel.tsx           Caption and the Share button for a finished video
   ApiKeyPanel.tsx          "Use my own key"
 lib/
   schemas.ts               Zod schemas for prompts, storyboards and the API
@@ -293,5 +313,9 @@ tests/                     Unit tests
   headless Chrome plus FFmpeg) for faster exports and the same file in every browser.
 - **A third-party video model**: an optional step that turns a scene into a generated clip,
   behind the same storyboard format.
+- **One-tap posting to your own Instagram and YouTube**: needs an Instagram professional
+  account with a Meta developer app and access token, a Google Cloud project approved for
+  YouTube uploads, somewhere to host the video briefly (Meta fetches it from a public link),
+  and an owner-only login so visitors cannot post to your accounts.
 - Also worth doing: saving and reopening projects, importing a storyboard `.json`, captions
   and translation into more languages, your own logo and colours.

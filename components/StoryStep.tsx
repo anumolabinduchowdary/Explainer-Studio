@@ -4,7 +4,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toErrorInfo } from "@/lib/api";
 import { downloadText, slugify } from "@/lib/download";
 import { useEndCardImage, withEndCard } from "@/lib/endCard";
+import { HEALTH_DISCLAIMER } from "@/lib/config";
 import { assemblePrompt } from "@/lib/prompt";
+import { suggestCaption } from "@/lib/share";
 import { dimensionsFor } from "@/lib/renderer";
 import type { FiveStepPrompt } from "@/lib/schemas";
 import {
@@ -40,7 +42,7 @@ import { useRecording } from "@/lib/useRecording";
 import { useCanvasFonts } from "@/lib/useRenderAssets";
 import { ExportPanel } from "./ExportPanel";
 import { Player, type DrawFunction, type PlayerHandle, type Transport } from "./Player";
-import { StoryPictures, needsDrawing, pictureSource } from "./StoryPictures";
+import { StoryPictures, characterNeedsDrawing, needsDrawing, pictureSource } from "./StoryPictures";
 import { StoryScenes } from "./StoryScenes";
 import { StoryVoices, clipKeysNeeded, type ClipMap, type ClipState } from "./StoryVoices";
 import { VideoDetails } from "./VideoDetails";
@@ -108,6 +110,9 @@ export function StoryStep(props: Props) {
   // Pictures and voice clips live in memory only: nothing is uploaded or saved anywhere.
   const [pictures, setPictures] = useState<PictureMap>({});
   const [mouthOff, setMouthOff] = useState<ReadonlySet<string>>(() => new Set());
+  // Hand gestures: an extra pose per character. On for the story, with a switch per character.
+  const [gesturesOn, setGesturesOn] = useState(true);
+  const [gestureOff, setGestureOff] = useState<ReadonlySet<string>>(() => new Set());
   const [pictureBatch, setPictureBatch] = useState<Batch>(null);
   const [clips, setClips] = useState<ClipMap>({});
   const [voicesOn, setVoicesOn] = useState(true);
@@ -116,12 +121,12 @@ export function StoryStep(props: Props) {
   const [activeIndex, setActiveIndex] = useState(0);
 
   // Drawing and recording take a while, so the jobs read the latest values through refs.
-  const live = useRef({ story, apiKey, pictures, clips });
+  const live = useRef({ story, apiKey, pictures, clips, gesturesOn });
   const aliveRef = useRef(true);
   const stopPicturesRef = useRef(false);
   const stopVoicesRef = useRef(false);
   useEffect(() => {
-    live.current = { story, apiKey, pictures, clips };
+    live.current = { story, apiKey, pictures, clips, gesturesOn };
   });
   useEffect(() => {
     aliveRef.current = true;
@@ -216,8 +221,14 @@ export function StoryStep(props: Props) {
     for (const character of story.characters) {
       const idle = ready(pictureKey.character(character.id));
       if (!idle) continue;
-      const talk = mouthOff.has(character.id) ? undefined : ready(pictureKey.talking(character.id));
-      characters.set(character.id, { idle, talk });
+      const mouth = !mouthOff.has(character.id);
+      const talk = mouth ? ready(pictureKey.talking(character.id)) : undefined;
+      const raised =
+        gesturesOn && !gestureOff.has(character.id) ? ready(pictureKey.gesture(character.id)) : undefined;
+      const gesture = raised
+        ? { idle: raised, talk: mouth ? ready(pictureKey.gestureTalking(character.id)) : undefined }
+        : undefined;
+      characters.set(character.id, { idle, talk, gesture });
     }
     for (const location of story.locations) {
       const sprite = ready(pictureKey.place(location.id));
@@ -233,7 +244,17 @@ export function StoryStep(props: Props) {
         return clip ? isMouthOpen(clip, lineLocal) : null;
       },
     };
-  }, [fonts, pictures, mouthOff, story.characters, story.locations, timeLine, readyClip]);
+  }, [
+    fonts,
+    pictures,
+    mouthOff,
+    gesturesOn,
+    gestureOff,
+    story.characters,
+    story.locations,
+    timeLine,
+    readyClip,
+  ]);
 
   const draw = useMemo<DrawFunction | null>(
     () => (assets ? (ctx, time, options) => drawStoryFrame(ctx, story, time, assets, options) : null),
@@ -295,45 +316,67 @@ export function StoryStep(props: Props) {
     [setPicture],
   );
 
+  /**
+   * Draws a character's pictures as a chain: standing, then the same with the
+   * mouth open, then (with gestures on) a hand raised, then that with the
+   * mouth open. Each is redrawn from the one before it, so they match.
+   * With `onlyMissing`, pictures that are already up to date are kept.
+   */
   const drawCharacter = useCallback(
-    async (characterId: string) => {
+    async (characterId: string, onlyMissing = false) => {
       const current = live.current.story;
       const character = current.characters.find((c) => c.id === characterId);
       if (!character) return;
-      const key = pictureKey.character(characterId);
-      const talkKey = pictureKey.talking(characterId);
+      const keys = {
+        idle: pictureKey.character(characterId),
+        talk: pictureKey.talking(characterId),
+        gesture: pictureKey.gesture(characterId),
+        gestureTalk: pictureKey.gestureTalking(characterId),
+      };
       const source = pictureSource.character(current, character);
       const request = {
         look: character.look,
         artStyle: current.artStyle,
         aspectRatio: current.aspectRatio,
       };
+      const before = live.current.pictures;
 
-      setPicture(talkKey, null);
-      setPicture(key, { status: "drawing" });
-      let dataUrl: string;
-      try {
-        dataUrl = await requestPicture({ kind: "character", ...request }, pictureOptions(key));
-        const sprite = await loadSprite(dataUrl, true);
-        setPicture(key, { status: "ready", picture: { dataUrl, sprite, source } });
-      } catch (err) {
-        setPicture(key, { status: "failed", error: toErrorInfo(err) });
-        return;
-      }
+      /** Draws one picture of the chain. Resolves to its data URL, or null if it failed. */
+      const step = async (
+        key: string,
+        kind: "character" | "talking" | "gesture",
+        from?: string,
+      ): Promise<string | null> => {
+        const existing = before[key];
+        if (onlyMissing && existing?.status === "ready" && existing.picture.source === source) {
+          return existing.picture.dataUrl;
+        }
+        setPicture(key, { status: "drawing" });
+        try {
+          const reference = from ? await referencePng(from) : undefined;
+          const dataUrl = await requestPicture(
+            { kind, ...request, ...(reference ? { reference } : {}) },
+            pictureOptions(key),
+          );
+          const sprite = await loadSprite(dataUrl, true);
+          setPicture(key, { status: "ready", picture: { dataUrl, sprite, source } });
+          return dataUrl;
+        } catch (err) {
+          setPicture(key, { status: "failed", error: toErrorInfo(err) });
+          return null;
+        }
+      };
 
-      // The talking pose is a bonus: if it fails, the character still works.
-      setPicture(talkKey, { status: "drawing" });
-      try {
-        const reference = await referencePng(dataUrl);
-        const talkUrl = await requestPicture(
-          { kind: "talking", ...request, reference },
-          pictureOptions(talkKey),
-        );
-        const sprite = await loadSprite(talkUrl, true);
-        setPicture(talkKey, { status: "ready", picture: { dataUrl: talkUrl, sprite, source } });
-      } catch (err) {
-        setPicture(talkKey, { status: "failed", error: toErrorInfo(err) });
+      if (!onlyMissing) {
+        for (const key of [keys.talk, keys.gesture, keys.gestureTalk]) setPicture(key, null);
       }
+      const idle = await step(keys.idle, "character");
+      if (!idle) return;
+      // Everything after the standing pose is a bonus: if it fails, the character still works.
+      await step(keys.talk, "talking", idle);
+      if (!live.current.gesturesOn) return;
+      const gesture = await step(keys.gesture, "gesture", idle);
+      if (gesture) await step(keys.gestureTalk, "talking", gesture);
     },
     [pictureOptions, setPicture],
   );
@@ -368,12 +411,11 @@ export function StoryStep(props: Props) {
 
   /** Draws everything that is missing, failed or out of date, two at a time. */
   const drawMissing = async () => {
-    const { story: current, pictures: drawn } = live.current;
+    const { story: current, pictures: drawn, gesturesOn: withGestures } = live.current;
     const jobs: Array<() => Promise<void>> = [];
     for (const character of current.characters) {
-      const state = drawn[pictureKey.character(character.id)];
-      if (needsDrawing(state, pictureSource.character(current, character))) {
-        jobs.push(() => drawCharacter(character.id));
+      if (characterNeedsDrawing(current, character, drawn, withGestures)) {
+        jobs.push(() => drawCharacter(character.id, true));
       }
     }
     for (const location of current.locations) {
@@ -480,6 +522,7 @@ export function StoryStep(props: Props) {
     if (clip) audio.preview(clip);
   };
 
+  // A missing gesture pose is only a missed extra; stand-ins appear only without the main pictures.
   const picturesWaiting =
     story.characters.some((character) =>
       needsDrawing(pictures[pictureKey.character(character.id)], pictureSource.character(story, character)),
@@ -520,6 +563,14 @@ export function StoryStep(props: Props) {
             duration={video.duration}
             fileBase={fileBase}
             scriptLabel="Story (.json)"
+            title={story.title}
+            caption={suggestCaption({
+              title: story.title,
+              health: story.scenes.some((scene) =>
+                scene.lines.some((line) => line.text.includes(HEALTH_DISCLAIMER)),
+              ),
+              aiVoices: hasVoices,
+            })}
             notice={
               picturesWaiting
                 ? "Some pictures are not drawn yet. Simple stand-ins will appear in the video until they are."
@@ -561,6 +612,21 @@ export function StoryStep(props: Props) {
             story={story}
             pictures={pictures}
             mouthOff={mouthOff}
+            gesturesOn={gesturesOn}
+            gestureOff={gestureOff}
+            onToggleGestures={() => {
+              setGesturesOn((on) => !on);
+              invalidate();
+            }}
+            onToggleGesture={(characterId) => {
+              setGestureOff((current) => {
+                const next = new Set(current);
+                if (next.has(characterId)) next.delete(characterId);
+                else next.add(characterId);
+                return next;
+              });
+              invalidate();
+            }}
             disabled={isRecording}
             batch={pictureBatch}
             onStoryChange={changeStory}

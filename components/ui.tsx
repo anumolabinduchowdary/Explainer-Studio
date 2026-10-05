@@ -180,6 +180,14 @@ export const RecordIcon = () => (
     <circle cx="12" cy="12" r="3.5" fill="currentColor" />
   </Icon>
 );
+export const ShareIcon = () => (
+  <Icon>
+    <circle cx="6" cy="12" r="2.5" />
+    <circle cx="18" cy="6" r="2.5" />
+    <circle cx="18" cy="18" r="2.5" />
+    <path d="M8.2 10.9l7.6-3.8M8.2 13.1l7.6 3.8" />
+  </Icon>
+);
 export const MicIcon = () => (
   <Icon>
     <rect x="9" y="3" width="6" height="11" rx="3" />

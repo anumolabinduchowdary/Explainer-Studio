@@ -96,7 +96,7 @@ export function useRecording(playerRef: RefObject<PlayerHandle | null>, sound?: 
         if (blob.size === 0) throw new Error("Empty recording");
         const url = URL.createObjectURL(blob);
         videoUrlRef.current = url;
-        setState({ status: "done", url, size: blob.size, format: active.format });
+        setState({ status: "done", url, size: blob.size, format: active.format, video: blob });
       } catch {
         setState({ status: "error" });
       }

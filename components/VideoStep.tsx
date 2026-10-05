@@ -7,6 +7,8 @@ import { useEndCardImage, withEndCard } from "@/lib/endCard";
 import type { ErrorInfo } from "@/lib/errors";
 import { assemblePrompt } from "@/lib/prompt";
 import { dimensionsFor, drawFrame, locate, sceneStart, totalDuration } from "@/lib/renderer";
+import { HEALTH_DISCLAIMER } from "@/lib/config";
+import { suggestCaption } from "@/lib/share";
 import { SceneResponseSchema, type FiveStepPrompt, type Storyboard } from "@/lib/schemas";
 import { useRecording } from "@/lib/useRecording";
 import { useRenderAssets } from "@/lib/useRenderAssets";
@@ -150,6 +152,12 @@ export function VideoStep(props: Props) {
             state={recording.state}
             duration={video.duration}
             fileBase={fileBase}
+            title={storyboard.title}
+            caption={suggestCaption({
+              title: storyboard.title,
+              health: storyboard.scenes.some((scene) => scene.body.includes(HEALTH_DISCLAIMER)),
+              aiVoices: false,
+            })}
             onRecord={recording.start}
             onCancel={recording.cancel}
             onDownloadStoryboard={() =>

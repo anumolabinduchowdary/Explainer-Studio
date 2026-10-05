@@ -5,6 +5,7 @@ import {
   captionChunks,
   characterName,
   estimateLine,
+  isGesturing,
   locateStory,
   type Story,
   type StoryCharacter,
@@ -28,9 +29,16 @@ export type Sprite = {
   height: number;
   /** A cropped copy for thumbnails, when the picture had empty space around it. */
   previewUrl?: string;
+  /** Where the feet are, in pixels from the left edge. Lines up different poses. */
+  feetX?: number;
 };
 
-export type CharacterSprites = { idle: Sprite; talk?: Sprite };
+export type CharacterSprites = {
+  idle: Sprite;
+  talk?: Sprite;
+  /** A second pose with a hand raised, used in stretches while the character talks. */
+  gesture?: { idle: Sprite; talk?: Sprite };
+};
 
 export type StoryRenderAssets = {
   characters: ReadonlyMap<string, CharacterSprites>;
@@ -260,7 +268,7 @@ export function drawStoryFrame(
   const zoom = settled ? 1.05 : 1.03 + 0.012 * Math.min(moment.sceneLocal, 6);
   drawBackdrop(ctx, assets.places.get(scene.locationId), dims, layout.floor, zoom);
 
-  /* Characters, back to front is simply left to right here. */
+  /* Characters: each keeps its place on screen (slot i) whatever the painting order. */
   const cast = scene.onStage
     .map((id) => story.characters.find((character) => character.id === id))
     .filter((character): character is StoryCharacter => Boolean(character))
@@ -269,7 +277,12 @@ export function drawStoryFrame(
   const maxWidth = W * (SLOT_WIDTH[cast.length] ?? 0.8);
   const arrive = settled ? 1 : easeOutCubic(clamp01(moment.sceneLocal / (SCENE_LEAD_SEC * 0.9)));
 
-  cast.forEach((character, i) => {
+  // The speaker is painted last, so a raised hand is never hidden behind a neighbour.
+  const paintOrder = cast
+    .map((character, i) => ({ character, i }))
+    .sort((a, b) => Number(a.character.id === speakerId) - Number(b.character.id === speakerId));
+
+  paintOrder.forEach(({ character, i }) => {
     const sprites = assets.characters.get(character.id);
     const isSpeaker = character.id === speakerId;
     const aspect = sprites ? sprites.idle.width / sprites.idle.height : 0.42;
@@ -296,12 +309,25 @@ export function drawStoryFrame(
     ctx.fill();
 
     ctx.translate(x, y);
+    // A speaker sways a little towards the person they are talking to.
+    if (isSpeaker && speaking) ctx.rotate(facing * 0.018 * Math.sin(moment.lineLocal * Math.PI * 0.9));
     ctx.scale(facing, breathe);
     if (sprites) {
-      // Both poses are drawn into the same box, which lines them up even if the
-      // talking pose came back slightly shifted or resized.
-      const pose = isSpeaker && mouthOpen && sprites.talk ? sprites.talk : sprites.idle;
-      ctx.drawImage(pose.source, -w / 2, -h, w, h);
+      const gesturing =
+        isSpeaker && speaking && sprites.gesture && line && timing
+          ? isGesturing(line, moment.lineLocal, timing)
+          : false;
+      const base = gesturing && sprites.gesture ? sprites.gesture.idle : sprites.idle;
+      const talk = gesturing && sprites.gesture ? sprites.gesture.talk : sprites.talk;
+      // A pose and its mouth-open twin are drawn into the same box, which lines
+      // them up even if the twin came back slightly shifted or resized.
+      const pose = isSpeaker && mouthOpen && talk ? talk : base;
+      // Different poses have different outlines, so they are lined up by the feet
+      // and drawn at the same scale as the standing pose.
+      const scale = h / sprites.idle.height;
+      const feet = -w / 2 + (sprites.idle.feetX ?? sprites.idle.width / 2) * scale;
+      const left = feet - (base.feetX ?? base.width / 2) * scale;
+      ctx.drawImage(pose.source, left, -base.height * scale, base.width * scale, base.height * scale);
     } else {
       ctx.scale(facing, 1); // keep the placeholder's letter readable
       drawPlaceholderCharacter(

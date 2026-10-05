@@ -132,7 +132,7 @@ export type StoryWire = z.infer<typeof StoryWireSchema>;
 
 export const StoryResponseSchema = z.object({ story: StorySchema });
 
-export const IMAGE_KINDS = ["character", "talking", "background"] as const;
+export const IMAGE_KINDS = ["character", "talking", "gesture", "background"] as const;
 export type ImageKind = (typeof IMAGE_KINDS)[number];
 
 /** Largest reference picture (a base64 PNG data URL) accepted for the talking pose. */
@@ -144,17 +144,17 @@ export const ImageRequestSchema = z
     look: z.string().trim().min(3, "Please describe what to draw.").max(STORY_LIMITS.look),
     artStyle: z.string().trim().max(STORY_LIMITS.artStyle),
     aspectRatio: z.enum(ASPECT_RATIOS),
-    /** For "talking": the character's finished picture, as a PNG data URL. */
+    /** For "talking" and "gesture": the picture to redraw from, as a PNG data URL. */
     reference: z
       .string()
       .max(MAX_REFERENCE_CHARS, "That picture is too large to use as a reference.")
       .regex(/^data:image\/png;base64,[A-Za-z0-9+/=]+$/, "The reference picture is not a valid PNG.")
       .optional(),
   })
-  .refine((request) => request.kind !== "talking" || Boolean(request.reference), {
-    message: "A reference picture is needed to draw the talking pose.",
-    path: ["reference"],
-  });
+  .refine(
+    (request) => (request.kind !== "talking" && request.kind !== "gesture") || Boolean(request.reference),
+    { message: "A reference picture is needed to redraw a character.", path: ["reference"] },
+  );
 export type ImageRequest = z.infer<typeof ImageRequestSchema>;
 
 export const ImageResponseSchema = z.object({
@@ -322,8 +322,27 @@ export function captionChunks(text: string): Array<{ text: string; words: number
 export const pictureKey = {
   character: (characterId: string) => `character:${characterId}`,
   talking: (characterId: string) => `talking:${characterId}`,
+  /** The same character with a hand raised, and that pose with the mouth open. */
+  gesture: (characterId: string) => `gesture:${characterId}`,
+  gestureTalking: (characterId: string) => `gesture-talking:${characterId}`,
   place: (locationId: string) => `place:${locationId}`,
 };
+
+/**
+ * Whether the speaker is mid-gesture at this moment of a line. Gestures come
+ * and go in stretches of about a second, on a rhythm that is fixed for each
+ * line so the preview and the recording always match.
+ */
+export function isGesturing(line: StoryLine, lineLocal: number, timing: LineTiming): boolean {
+  let seed = 0;
+  for (let i = 0; i < line.text.length; i++) seed = (seed * 31 + line.text.charCodeAt(i)) >>> 0;
+  const spoken = timing.speechEnd - timing.speechStart;
+  // A short line is either said with the hand up throughout, or not at all.
+  if (spoken < 1.2) return seed % 2 === 0;
+  const period = 2.4;
+  const phase = ((seed % 12) / 12) * period;
+  return (lineLocal - timing.speechStart + phase) % period > period * 0.5;
+}
 
 export function characterName(story: Story, speaker: string): string {
   if (speaker === NARRATOR) return "Narrator";
