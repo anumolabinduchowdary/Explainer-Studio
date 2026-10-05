@@ -1,0 +1,66 @@
+@import "tailwindcss";
+
+/* Design tokens: a warm, hopeful palette with AA contrast on every text pair. */
+@theme {
+  --color-canvas: #fffaf3;
+  --color-surface: #ffffff;
+  --color-ink: #2b2118;
+  --color-muted: #6b5b4d;
+  --color-line: #eadfd2;
+  --color-brand: #0f766e;
+  --color-brand-strong: #115e59;
+  --color-brand-soft: #e6f4f1;
+  --color-sun: #f59e0b;
+  --color-sun-soft: #fef3c7;
+  --color-danger: #b42318;
+  --color-danger-soft: #fef3f2;
+}
+
+@theme inline {
+  --font-sans: var(--font-body), ui-sans-serif, system-ui, sans-serif;
+  --font-display: var(--font-heading), ui-sans-serif, system-ui, sans-serif;
+}
+
+:root {
+  color-scheme: light;
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  background: var(--color-canvas);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+}
+
+/* One clear, consistent focus ring for keyboard users. */
+:focus-visible {
+  outline: 3px solid var(--color-brand);
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+
+button,
+[role="button"],
+summary,
+select {
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+button:disabled {
+  cursor: not-allowed;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

@@ -1,0 +1,122 @@
+{
+  "title": "Understanding Cerebral Palsy",
+  "aspectRatio": "9:16",
+  "scenes": [
+    {
+      "id": "s1",
+      "durationSec": 8,
+      "heading": "Understanding Cerebral Palsy",
+      "body": "A short guide for parents and families.",
+      "bullets": [],
+      "visual": "family",
+      "transition": "fade"
+    },
+    {
+      "id": "s2",
+      "durationSec": 10,
+      "heading": "What is cerebral palsy?",
+      "body": "Cerebral palsy, or CP, is a group of conditions that affect how a child moves, balances and holds their body.",
+      "bullets": [],
+      "visual": "question",
+      "transition": "slide-up"
+    },
+    {
+      "id": "s3",
+      "durationSec": 10,
+      "heading": "It begins in the developing brain",
+      "body": "CP happens when the part of the brain that guides movement is injured or develops differently, before, during or soon after birth.",
+      "bullets": ["It is not contagious", "It is nobody's fault"],
+      "visual": "brain",
+      "transition": "slide-left"
+    },
+    {
+      "id": "s4",
+      "durationSec": 10,
+      "heading": "Every child is different",
+      "body": "CP looks different in each child. Some need a little support, others need more.",
+      "bullets": [
+        "Some children walk on their own",
+        "Some use a walker or a wheelchair",
+        "Some find speaking difficult"
+      ],
+      "visual": "friends",
+      "transition": "fade"
+    },
+    {
+      "id": "s5",
+      "durationSec": 12,
+      "heading": "Signs to look out for",
+      "body": "Talk to a doctor if your baby:",
+      "bullets": [
+        "Feels very stiff or very floppy",
+        "Is late to hold their head up, roll or sit",
+        "Mostly uses one side of the body"
+      ],
+      "visual": "checklist",
+      "transition": "slide-up"
+    },
+    {
+      "id": "s6",
+      "durationSec": 10,
+      "heading": "Trust what you notice",
+      "body": "You know your child best. If something worries you, ask a doctor. The earlier, the better.",
+      "bullets": [],
+      "visual": "doctor",
+      "transition": "zoom"
+    },
+    {
+      "id": "s7",
+      "durationSec": 10,
+      "heading": "Early support helps",
+      "body": "Therapy that starts early helps children build strength, movement and everyday skills.",
+      "bullets": ["Physiotherapy", "Occupational therapy", "Speech therapy"],
+      "visual": "therapy-ball",
+      "transition": "slide-left"
+    },
+    {
+      "id": "s8",
+      "durationSec": 10,
+      "heading": "Tools that open doors",
+      "body": "Walkers, wheelchairs and braces help children move, explore and join in.",
+      "bullets": [],
+      "visual": "child-walker",
+      "transition": "fade"
+    },
+    {
+      "id": "s9",
+      "durationSec": 10,
+      "heading": "Many ways to communicate",
+      "body": "Some children talk with words. Others use gestures, pictures or a tablet. Every voice matters.",
+      "bullets": [],
+      "visual": "picture-tablet",
+      "transition": "slide-up"
+    },
+    {
+      "id": "s10",
+      "durationSec": 10,
+      "heading": "Learning, playing, belonging",
+      "body": "Children with CP go to school, make friends and love to play. Inclusion helps every child grow.",
+      "bullets": [],
+      "visual": "child-wheelchair",
+      "transition": "slide-left"
+    },
+    {
+      "id": "s11",
+      "durationSec": 10,
+      "heading": "You are not alone",
+      "body": "Doctors, therapists, teachers and other families can walk this journey with you.",
+      "bullets": ["Ask about early support near you", "Connect with other parents"],
+      "visual": "helping-hands",
+      "transition": "fade"
+    },
+    {
+      "id": "s12",
+      "durationSec": 10,
+      "heading": "Every child can shine",
+      "body": "With love, support and opportunity, children with cerebral palsy can thrive. For awareness, not medical advice.",
+      "bullets": [],
+      "visual": "sun",
+      "transition": "zoom"
+    }
+  ]
+}
