@@ -49,9 +49,14 @@ export const VOICE_AGE_SETTINGS: Record<VoiceAge, { label: string; rate: number;
   child: {
     label: "Child",
     rate: 1.2,
+    // A child's voice comes from shorter vocal cords and a smaller throat: higher,
+    // lighter and brighter, with less resonance and depth. The pitch shift (rate)
+    // supplies the "smaller" sound; these words ask the voice to act the rest.
     // Asked to speak slowly because the pitch shift also speeds the line up.
+    // Deliberately not asked to mispronounce words: the lines must stay easy to
+    // follow, and unclear speech could read as mocking a speech difficulty.
     manner:
-      "a young child of about six, with a light, bright, eager voice. Speak a little slowly and very clearly",
+      "a young child of about six. The voice is high-pitched, light and bright, thin rather than deep, with very little chest resonance, and sounds eager and childlike. Speak a little slowly and say every word clearly",
   },
   teen: {
     label: "Teenager",
