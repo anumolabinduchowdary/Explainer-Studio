@@ -10,7 +10,8 @@
       "look": "A friendly Indian woman doctor in her forties with brown skin, black hair in a low bun and round glasses, wearing a white coat over a teal kurta, with a stethoscope around her neck.",
       "size": "large",
       "voice": "sage",
-      "voiceStyle": "A calm, reassuring doctor in her forties, kind and unhurried"
+      "voiceAge": "adult",
+      "voiceStyle": "Calm, reassuring, kind and unhurried"
     },
     {
       "id": "c2",
@@ -18,7 +19,8 @@
       "look": "An Indian mother in her thirties with warm brown skin and a long black plait, wearing a mustard yellow salwar kameez with a pink dupatta.",
       "size": "large",
       "voice": "coral",
-      "voiceStyle": "A caring mother in her thirties, worried at first, then relieved"
+      "voiceAge": "adult",
+      "voiceStyle": "Caring, worried at first, then relieved"
     },
     {
       "id": "c3",
@@ -26,7 +28,8 @@
       "look": "A cheerful six-year-old Indian boy with brown skin and short black hair, wearing a red T-shirt and blue shorts, standing with a small blue children's walker that he holds with both hands.",
       "size": "small",
       "voice": "verse",
-      "voiceStyle": "A cheerful six-year-old boy, bright, quick and proud"
+      "voiceAge": "child",
+      "voiceStyle": "Cheerful, quick and proud"
     }
   ],
   "locations": [

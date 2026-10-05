@@ -15,20 +15,57 @@ export const CHARACTER_SIZES = ["small", "medium", "large"] as const;
  * People choose by listening.
  */
 export const VOICES = [
-  { id: "marin", hint: "female, warm" },
-  { id: "cedar", hint: "male, warm" },
-  { id: "coral", hint: "female, bright" },
-  { id: "sage", hint: "female, calm" },
-  { id: "nova", hint: "female, lively" },
-  { id: "shimmer", hint: "female, soft" },
-  { id: "alloy", hint: "neutral" },
-  { id: "ash", hint: "male, friendly" },
-  { id: "echo", hint: "male, steady" },
-  { id: "verse", hint: "male, expressive" },
-  { id: "ballad", hint: "male, gentle" },
-  { id: "fable", hint: "male, storyteller" },
-  { id: "onyx", hint: "male, deep" },
+  { id: "marin", group: "women", hint: "female, warm" },
+  { id: "coral", group: "women", hint: "female, bright" },
+  { id: "sage", group: "women", hint: "female, calm" },
+  { id: "nova", group: "women", hint: "female, lively" },
+  { id: "shimmer", group: "women", hint: "female, soft" },
+  { id: "cedar", group: "men", hint: "male, warm" },
+  { id: "ash", group: "men", hint: "male, friendly" },
+  { id: "echo", group: "men", hint: "male, steady" },
+  { id: "verse", group: "men", hint: "male, expressive" },
+  { id: "ballad", group: "men", hint: "male, gentle" },
+  { id: "fable", group: "men", hint: "male, storyteller" },
+  { id: "onyx", group: "men", hint: "male, deep" },
+  { id: "alloy", group: "neutral", hint: "neutral" },
 ] as const;
+
+export const VOICE_GROUPS = [
+  { id: "women", label: "Women's voices" },
+  { id: "men", label: "Men's voices" },
+  { id: "neutral", label: "Neutral voice" },
+] as const;
+
+/**
+ * Ages. Every OpenAI voice is an adult, so other ages are approximated in two
+ * ways at once: the voice is asked to act the age (`manner`), and the finished
+ * recording is played back faster or slower (`rate`), which raises or lowers
+ * the pitch the way a smaller or older voice sounds.
+ */
+export const VOICE_AGES = ["child", "teen", "adult", "older"] as const;
+export type VoiceAge = (typeof VOICE_AGES)[number];
+
+export const VOICE_AGE_SETTINGS: Record<VoiceAge, { label: string; rate: number; manner: string }> = {
+  child: {
+    label: "Child",
+    rate: 1.2,
+    // Asked to speak slowly because the pitch shift also speeds the line up.
+    manner:
+      "a young child of about six, with a light, bright, eager voice. Speak a little slowly and very clearly",
+  },
+  teen: {
+    label: "Teenager",
+    rate: 1.08,
+    manner: "a teenager, with a young, lively, casual voice",
+  },
+  adult: { label: "Adult", rate: 1, manner: "" },
+  older: {
+    label: "Older person",
+    rate: 0.93,
+    manner:
+      "an elderly person in their seventies, with a gentle, slightly aged voice, warm and unhurried, with small pauses",
+  },
+};
 export type VoiceId = (typeof VOICES)[number]["id"];
 export const VOICE_IDS = VOICES.map((voice) => voice.id) as [VoiceId, ...VoiceId[]];
 export const DEFAULT_NARRATOR_VOICE: VoiceId = "alloy";
@@ -59,7 +96,9 @@ export const StoryCharacterSchema = z.object({
   look: z.string().trim().max(STORY_LIMITS.look),
   size: z.enum(CHARACTER_SIZES),
   voice: z.enum(VOICE_IDS),
-  /** How the character sounds, in a few words: age, mood, pace. */
+  /** The character's age group, which shapes how the voice is acted and pitched. */
+  voiceAge: z.enum(VOICE_AGES),
+  /** How the character sounds, in a few words: mood, pace, personality. */
   voiceStyle: z.string().trim().max(STORY_LIMITS.voiceStyle),
 });
 export type StoryCharacter = z.infer<typeof StoryCharacterSchema>;
@@ -111,6 +150,7 @@ export const StoryWireSchema = z.object({
       look: z.string(),
       size: z.enum(CHARACTER_SIZES),
       voice: z.enum(VOICE_IDS),
+      voiceAge: z.enum(VOICE_AGES),
       voiceStyle: z.string(),
     }),
   ),
@@ -164,8 +204,10 @@ export const ImageResponseSchema = z.object({
 export const SpeechRequestSchema = z.object({
   text: z.string().trim().min(1, "There is nothing to say.").max(STORY_LIMITS.lineText),
   voice: z.enum(VOICE_IDS),
-  /** How to say it, e.g. "a cheerful six-year-old boy". */
+  /** How to say it, e.g. "cheerful and proud". */
   style: z.string().trim().max(STORY_LIMITS.voiceStyle).optional(),
+  /** The speaker's age group. Defaults to an adult. */
+  age: z.enum(VOICE_AGES).optional(),
 });
 export type SpeechRequest = z.infer<typeof SpeechRequestSchema>;
 
@@ -355,11 +397,14 @@ export function characterName(story: Story, speaker: string): string {
 
 const NARRATOR_STYLE = "A warm, clear storyteller";
 
-/** The voice and manner for a line, depending on who says it. */
-export function lineVoice(story: Story, line: StoryLine): { voice: VoiceId; style: string } {
+/** The voice, age and manner for a line, depending on who says it. */
+export function lineVoice(
+  story: Story,
+  line: StoryLine,
+): { voice: VoiceId; age: VoiceAge; style: string } {
   const character = story.characters.find((c) => c.id === line.speaker);
-  if (!character) return { voice: story.narratorVoice, style: NARRATOR_STYLE };
-  return { voice: character.voice, style: character.voiceStyle };
+  if (!character) return { voice: story.narratorVoice, age: "adult", style: NARRATOR_STYLE };
+  return { voice: character.voice, age: character.voiceAge, style: character.voiceStyle };
 }
 
 /**
@@ -367,6 +412,6 @@ export function lineVoice(story: Story, line: StoryLine): { voice: VoiceId; styl
  * its clip; an edited line (or a changed voice) needs a new one.
  */
 export function clipKey(story: Story, line: StoryLine): string {
-  const { voice, style } = lineVoice(story, line);
-  return `${voice}|${style}|${line.text.trim()}`;
+  const { voice, age, style } = lineVoice(story, line);
+  return `${voice}|${age}|${style}|${line.text.trim()}`;
 }

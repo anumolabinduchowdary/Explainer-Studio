@@ -87,8 +87,8 @@ A cartoon story is a short conversation between up to four characters, in up to 
    a background. The app places the characters in the background, makes the speaker bounce
    and move their mouth, and shows the words as large captions.
 4. Click **Record the voices**. Each line is spoken by an AI voice. The story gives every
-   character a voice and a manner of speaking ("a cheerful six-year-old boy"); change either
-   and press **Listen** to compare. The speaker's mouth then follows the loudness of the
+   character a voice (grouped into women's and men's voices), an age and a manner of speaking
+   ("cheerful, quick and proud"); change any of them and press **Listen** to compare. The speaker's mouth then follows the loudness of the
    voice, the captions follow its timing, and the sound is included in the downloaded video.
 5. Edit names, descriptions, lines and who is on screen; redraw any picture; then record.
 
@@ -113,8 +113,13 @@ Things to know:
   you share the video.
 - **Voices cost per line.** One request per spoken line, so about 15 for the example story.
   Editing a line, or changing a character's voice, means recording that line again.
-- **There are no child voices.** A child character is an adult voice asked to sound young.
-  Listen before you publish, and change the voice or the description if it does not fit.
+- **Children and older people.** OpenAI's 13 voices are all adults. The **Age** setting
+  (Child, Teenager, Adult, Older person) gets closer in two ways at once: the voice is asked
+  to act that age, and the recording is played back faster or slower, which raises or lowers
+  its pitch (a child about 20% higher, a teenager 8% higher, an older person 7% lower). The
+  result is a cartoon-style child or elder, not a real one. Listen before you publish, and
+  try another voice if it does not fit. The amounts are set in `VOICE_AGE_SETTINGS` in
+  `lib/story.ts`.
 - **Languages.** The voices speak the language the lines are written in, but they are tuned
   for English. Check the pronunciation in other languages before sharing.
 - **Captions are timed by estimate.** The speech service does not say when each word is

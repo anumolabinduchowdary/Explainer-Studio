@@ -6,9 +6,13 @@ import {
   NARRATOR,
   STORY_LIMITS,
   VOICES,
+  VOICE_AGES,
+  VOICE_AGE_SETTINGS,
+  VOICE_GROUPS,
   clipKey,
   type Story,
   type StoryCharacter,
+  type VoiceAge,
   type VoiceId,
 } from "@/lib/story";
 import type { Clip } from "@/lib/storyAudio";
@@ -84,6 +88,10 @@ export function StoryVoices(props: Props) {
         are computer-generated, not real people: please say so wherever you share the video. Each
         line is charged to the OpenAI account in use.
       </p>
+      <p className="mt-1 text-muted">
+        All the voices are adults. For a child or an older person, set the age: the voice then
+        acts that age and its pitch is raised or lowered to match. Press Listen to check it.
+      </p>
 
       <fieldset disabled={disabled} className="mt-3 min-w-0 space-y-4 disabled:opacity-60">
         <legend className="sr-only">Voices for this story</legend>
@@ -154,6 +162,8 @@ export function StoryVoices(props: Props) {
               key={character.id}
               name={character.name || "Character"}
               voice={character.voice}
+              age={character.voiceAge}
+              onAgeChange={(voiceAge) => updateCharacter(character.id, { voiceAge })}
               style={character.voiceStyle}
               busy={props.listeningTo === character.id}
               onVoiceChange={(voice) => updateCharacter(character.id, { voice })}
@@ -170,7 +180,9 @@ export function StoryVoices(props: Props) {
 type RowProps = {
   name: string;
   voice: VoiceId;
-  /** Characters have a manner of speaking; the narrator does not. */
+  /** Characters have an age and a manner of speaking; the narrator does not. */
+  age?: VoiceAge;
+  onAgeChange?: (age: VoiceAge) => void;
   style?: string;
   busy: boolean;
   onVoiceChange: (voice: VoiceId) => void;
@@ -194,10 +206,14 @@ function VoiceRow(props: RowProps) {
             onChange={(event) => props.onVoiceChange(event.target.value as VoiceId)}
             className={`${inputClass} min-h-11`}
           >
-            {VOICES.map((voice) => (
-              <option key={voice.id} value={voice.id}>
-                {voice.id[0].toUpperCase() + voice.id.slice(1)} ({voice.hint})
-              </option>
+            {VOICE_GROUPS.map((group) => (
+              <optgroup key={group.id} label={group.label}>
+                {VOICES.filter((voice) => voice.group === group.id).map((voice) => (
+                  <option key={voice.id} value={voice.id}>
+                    {voice.id[0].toUpperCase() + voice.id.slice(1)} ({voice.hint})
+                  </option>
+                ))}
+              </optgroup>
             ))}
           </select>
         </div>
@@ -206,6 +222,25 @@ function VoiceRow(props: RowProps) {
           Listen
         </Button>
       </div>
+      {props.onAgeChange && (
+        <>
+          <label htmlFor={`${id}-age`} className="mb-1 mt-3 block font-semibold">
+            Age
+          </label>
+          <select
+            id={`${id}-age`}
+            value={props.age ?? "adult"}
+            onChange={(event) => props.onAgeChange?.(event.target.value as VoiceAge)}
+            className={`${inputClass} min-h-11`}
+          >
+            {VOICE_AGES.map((age) => (
+              <option key={age} value={age}>
+                {VOICE_AGE_SETTINGS[age].label}
+              </option>
+            ))}
+          </select>
+        </>
+      )}
       {props.onStyleChange && (
         <>
           <label htmlFor={`${id}-style`} className="mb-1 mt-3 block font-semibold">
@@ -216,7 +251,7 @@ function VoiceRow(props: RowProps) {
             type="text"
             value={props.style ?? ""}
             maxLength={STORY_LIMITS.voiceStyle}
-            placeholder="e.g. a cheerful six-year-old boy, bright and quick"
+            placeholder="e.g. cheerful, quick and proud"
             onChange={(event) => props.onStyleChange?.(event.target.value)}
             className={inputClass}
           />

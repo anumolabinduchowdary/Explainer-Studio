@@ -193,9 +193,11 @@ Characters (2 to 4 in total):
 - An object or body part can be a character with a face (for example a brain or a heart) when that helps explain an idea.
 - Show disabled characters as capable individuals with their own personality. A mobility aid or device is simply part of how the character looks.
 - size: "small" for a child or an object, "medium" for a teenager, "large" for an adult.
-- voice: the voice that will speak this character's lines. Choose from this list (name: how it tends to sound) and give each character a different voice where you can:
+- voiceAge: "child" (under about 12), "teen", "adult", or "older" (about 60 and over). Set it from the character's age; the app uses it to make the voice sound that age.
+- voice: the voice that will speak this character's lines. All the voices are adults, so choose by gender and personality, and give each character a different voice where you can (name: how it tends to sound):
 ${VOICES.map((voice) => `  ${voice.id}: ${voice.hint}`).join("\n")}
-- voiceStyle: a few words on how the character sounds, for example "a cheerful six-year-old boy, bright and quick" or "a calm, reassuring doctor in her forties". There are no child voices, so say clearly when a character is a child.
+  For a girl or a woman choose a female voice; for a boy or a man choose a male voice.
+- voiceStyle: a few words on the character's manner of speaking, for example "cheerful, quick and proud" or "calm and reassuring". Do not repeat the age here.
 
 Locations (1 to 3 in total):
 - id: "l1", "l2" and so on. name: one or two words.

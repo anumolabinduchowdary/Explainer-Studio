@@ -11,6 +11,7 @@ import { dimensionsFor } from "@/lib/renderer";
 import type { FiveStepPrompt } from "@/lib/schemas";
 import {
   NARRATOR,
+  VOICE_AGE_SETTINGS,
   clipKey,
   estimateLine,
   lineStarts,
@@ -455,17 +456,17 @@ export function StoryStep(props: Props) {
       const existing = live.current.clips[key];
       if (existing?.status === "ready") return existing.clip;
       const audio = getAudio();
-      const { voice, style } = lineVoice(current, line);
+      const { voice, age, style } = lineVoice(current, line);
       setClip(key, { status: "recording" });
       try {
         const dataUrl = await requestSpeech(
-          { text: line.text.trim(), voice, ...(style ? { style } : {}) },
+          { text: line.text.trim(), voice, age, ...(style ? { style } : {}) },
           {
             apiKey: live.current.apiKey || undefined,
             shouldStop: () => !aliveRef.current || stopVoicesRef.current,
           },
         );
-        const clip = await audio.decode(dataUrl);
+        const clip = await audio.decode(dataUrl, VOICE_AGE_SETTINGS[age].rate);
         setClip(key, { status: "ready", clip });
         return clip;
       } catch (err) {

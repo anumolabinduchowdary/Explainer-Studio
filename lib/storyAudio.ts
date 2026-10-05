@@ -50,6 +50,18 @@ function analyse(buffer: AudioBuffer): Pick<Clip, "envelope" | "speechStart" | "
   };
 }
 
+/** Re-renders a recording at a different speed, shifting its pitch with it. */
+async function resample(buffer: AudioBuffer, rate: number): Promise<AudioBuffer> {
+  const length = Math.max(1, Math.ceil(buffer.length / rate));
+  const offline = new OfflineAudioContext(buffer.numberOfChannels, length, buffer.sampleRate);
+  const source = offline.createBufferSource();
+  source.buffer = buffer;
+  source.playbackRate.value = rate;
+  source.connect(offline.destination);
+  source.start();
+  return offline.startRendering();
+}
+
 export type ScheduledClip = { at: number; clip: Clip };
 
 /**
@@ -75,9 +87,15 @@ export class StoryAudio {
     this.output.connect(this.recordingTap);
   }
 
-  async decode(dataUrl: string): Promise<Clip> {
+  /**
+   * Turns a recording into a playable clip. With a `rate` other than 1 the
+   * clip is re-rendered faster or slower, which raises or lowers its pitch:
+   * that is how an adult voice is made to sound like a child or an older person.
+   */
+  async decode(dataUrl: string, rate = 1): Promise<Clip> {
     const bytes = await (await fetch(dataUrl)).arrayBuffer();
-    const buffer = await this.context.decodeAudioData(bytes);
+    let buffer = await this.context.decodeAudioData(bytes);
+    if (rate !== 1) buffer = await resample(buffer, rate);
     return { buffer, duration: buffer.duration, ...analyse(buffer) };
   }
 

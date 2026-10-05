@@ -19,6 +19,10 @@ import {
   SpeechRequestSchema,
   StorySchema,
   StoryWireSchema,
+  VOICES,
+  VOICE_AGES,
+  VOICE_AGE_SETTINGS,
+  VOICE_GROUPS,
   VOICE_IDS,
   captionChunks,
   clipKey,
@@ -117,8 +121,8 @@ const wire = (overrides: Partial<StoryWire> = {}): StoryWire => ({
   narratorVoice: "alloy",
   isHealthTopic: false,
   characters: [
-    { id: "doc", name: "Dr. Asha", look: "A friendly doctor.", size: "large", voice: "sage", voiceStyle: "calm" },
-    { id: "kid", name: "Aarav", look: "A cheerful boy.", size: "small", voice: "verse", voiceStyle: "a young boy" },
+    { id: "doc", name: "Dr. Asha", look: "A friendly doctor.", size: "large", voice: "sage", voiceAge: "adult", voiceStyle: "calm" },
+    { id: "kid", name: "Aarav", look: "A cheerful boy.", size: "small", voice: "verse", voiceAge: "child", voiceStyle: "proud" },
   ],
   locations: [{ id: "clinic", name: "Clinic", look: "A bright clinic room." }],
   scenes: [
@@ -153,9 +157,9 @@ describe("normalizeStory", () => {
     ]);
     expect(story.artStyle).toBe(DEFAULT_ART_STYLE);
     expect(story.narratorVoice).toBe("alloy");
-    expect(story.characters.map((c) => [c.voice, c.voiceStyle])).toEqual([
-      ["sage", "calm"],
-      ["verse", "a young boy"],
+    expect(story.characters.map((c) => [c.voice, c.voiceAge, c.voiceStyle])).toEqual([
+      ["sage", "adult", "calm"],
+      ["verse", "child", "proud"],
     ]);
   });
 
@@ -166,6 +170,7 @@ describe("normalizeStory", () => {
       look: `Character ${id}`,
       size: "large" as const,
       voice: "alloy" as const,
+      voiceAge: "adult" as const,
       voiceStyle: "",
     }));
     const story = normalizeStory(
@@ -366,9 +371,13 @@ describe("voices", () => {
   });
 
   it("picks the voice by who is speaking", () => {
-    expect(lineVoice(story, firstScene.lines[0]).voice).toBe(story.narratorVoice);
+    expect(lineVoice(story, firstScene.lines[0])).toMatchObject({ voice: story.narratorVoice, age: "adult" });
     const meera = story.characters[1];
-    expect(lineVoice(story, firstScene.lines[1])).toEqual({ voice: meera.voice, style: meera.voiceStyle });
+    expect(lineVoice(story, firstScene.lines[1])).toEqual({
+      voice: meera.voice,
+      age: meera.voiceAge,
+      style: meera.voiceStyle,
+    });
   });
 
   it("keeps a clip when a line moves, and asks for a new one when the words or voice change", () => {
@@ -381,6 +390,33 @@ describe("voices", () => {
       characters: story.characters.map((c) => (c.id === line.speaker ? { ...c, voice: "nova" as const } : c)),
     };
     expect(clipKey(revoiced, line)).not.toBe(key);
+    const aged = {
+      ...story,
+      characters: story.characters.map((c) => (c.id === line.speaker ? { ...c, voiceAge: "older" as const } : c)),
+    };
+    expect(clipKey(aged, line)).not.toBe(key);
+  });
+
+  it("offers every age, grouped voices for women and men, and a child in the example", () => {
+    expect(Object.keys(VOICE_AGE_SETTINGS)).toEqual([...VOICE_AGES]);
+    // A child is pitched up, an older person down, an adult left alone.
+    expect(VOICE_AGE_SETTINGS.child.rate).toBeGreaterThan(VOICE_AGE_SETTINGS.teen.rate);
+    expect(VOICE_AGE_SETTINGS.teen.rate).toBeGreaterThan(1);
+    expect(VOICE_AGE_SETTINGS.adult.rate).toBe(1);
+    expect(VOICE_AGE_SETTINGS.older.rate).toBeLessThan(1);
+    for (const group of ["women", "men"]) {
+      expect(VOICES.filter((voice) => voice.group === group).length).toBeGreaterThanOrEqual(5);
+    }
+    expect(VOICES.every((voice) => VOICE_GROUPS.some((group) => group.id === voice.group))).toBe(true);
+    expect(story.characters.map((c) => c.voiceAge)).toEqual(["adult", "adult", "child"]);
+  });
+
+  it("asks the voice to act the character's age", () => {
+    expect(speechInstructions("proud", "child")).toContain("young child");
+    expect(speechInstructions("gentle", "older")).toContain("elderly");
+    expect(speechInstructions("calm", "adult")).not.toMatch(/child|elderly|teenager/);
+    expect(SpeechRequestSchema.safeParse({ text: "Hi", voice: "sage", age: "child" }).success).toBe(true);
+    expect(SpeechRequestSchema.safeParse({ text: "Hi", voice: "sage", age: "baby" }).success).toBe(false);
   });
 
   it("uses real clip lengths for timing once they exist", () => {
@@ -412,7 +448,12 @@ describe("voices", () => {
 
   it("speaks a line as MP3 in the chosen voice and manner", async () => {
     const { client, create } = fakeSpeech();
-    const audio = await generateSpeech(client, { text: "Hello!", voice: "verse", style: "a cheerful boy" });
+    const audio = await generateSpeech(client, {
+      text: "Hello!",
+      voice: "verse",
+      style: "a cheerful boy",
+      age: "child",
+    });
     expect(audio).toBe("data:audio/mpeg;base64,AQID");
     const params = firstCall(create);
     expect(params).toMatchObject({
@@ -422,6 +463,7 @@ describe("voices", () => {
       response_format: "mp3",
     });
     expect(params.instructions).toContain("a cheerful boy");
+    expect(params.instructions).toContain("young child");
     expect(speechInstructions(undefined)).not.toContain("sounds like this");
   });
 

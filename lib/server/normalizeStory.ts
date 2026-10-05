@@ -96,6 +96,7 @@ export function normalizeStory(wire: StoryWire): Story {
       look: clip(c.look, STORY_LIMITS.look),
       size: c.size,
       voice: c.voice,
+      voiceAge: c.voiceAge,
       voiceStyle: clip(c.voiceStyle, STORY_LIMITS.voiceStyle),
     })),
     locations: places.items.map((l) => ({
