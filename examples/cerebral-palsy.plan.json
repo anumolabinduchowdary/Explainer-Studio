@@ -1,0 +1,48 @@
+{
+  "message": "Cerebral palsy affects how a child moves, not who they are. With early support, therapy and inclusion, children with cerebral palsy learn, play and take part.",
+  "characters": [
+    {
+      "id": "c1",
+      "name": "Dr. Asha",
+      "role": "children's doctor",
+      "age": "adult",
+      "look": "A friendly Indian woman doctor in her forties with brown skin, black hair in a low bun and round glasses, wearing a white coat over a teal kurta, with a stethoscope around her neck."
+    },
+    {
+      "id": "c2",
+      "name": "Meera",
+      "role": "Aarav's mother",
+      "age": "adult",
+      "look": "An Indian mother in her thirties with warm brown skin and a long black plait, wearing a mustard yellow salwar kameez with a pink dupatta."
+    },
+    {
+      "id": "c3",
+      "name": "Aarav",
+      "role": "six-year-old boy who uses a walker",
+      "age": "child",
+      "look": "A cheerful six-year-old Indian boy with brown skin and short black hair, wearing a red T-shirt and blue shorts, standing with a small blue children's walker that he holds with both hands."
+    }
+  ],
+  "places": [
+    {
+      "id": "l1",
+      "name": "Home",
+      "look": "A cosy living room in an Indian home with a sofa, a window with curtains and a patterned rug."
+    },
+    {
+      "id": "l2",
+      "name": "Clinic",
+      "look": "A bright children's clinic room with a desk, a height chart on the wall and a potted plant."
+    },
+    {
+      "id": "l3",
+      "name": "Park",
+      "look": "A sunny neighbourhood park with green grass, trees, a path and a blue sky with soft clouds."
+    }
+  ],
+  "lengthSec": 45,
+  "aspectRatio": "9:16",
+  "language": "English",
+  "tone": "Warm and hopeful",
+  "notes": "Show Aarav as active, capable and included. No statistics, no diagnosis or treatment advice."
+}

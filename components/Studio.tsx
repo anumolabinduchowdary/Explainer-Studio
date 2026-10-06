@@ -3,6 +3,7 @@
 import { useCallback, useState } from "react";
 import { postJson, toErrorInfo } from "@/lib/api";
 import type { ErrorInfo } from "@/lib/errors";
+import { PlanResponseSchema, type StoryPlan } from "@/lib/plan";
 import { EMPTY_PROMPT } from "@/lib/prompt";
 import { SAMPLE, SAMPLE_STORY } from "@/lib/sample";
 import {
@@ -14,6 +15,7 @@ import {
 } from "@/lib/schemas";
 import { StoryResponseSchema, type Story } from "@/lib/story";
 import { DescribeStep, type BuildOptions } from "./DescribeStep";
+import { PlanStep } from "./PlanStep";
 import { PromptStep } from "./PromptStep";
 import { Stepper, type Step } from "./Stepper";
 import { StoryStep } from "./StoryStep";
@@ -29,7 +31,11 @@ type Props = {
   onUseOwnKey: () => void;
 };
 
-/** The three-step flow (Describe, Prompt, Video) for one kind of video. */
+/**
+ * The three-step flow for one kind of video. Explainer videos go Describe,
+ * Prompt, Video. Cartoon stories go Describe, Plan, Video: the plan lists the
+ * characters and places, so the story has exactly the cast the user asked for.
+ */
 export default function Studio({ kind, active, apiKey, onUseOwnKey }: Props) {
   const [step, setStep] = useState<Step>("describe");
   const [hasNavigated, setHasNavigated] = useState(false);
@@ -37,6 +43,7 @@ export default function Studio({ kind, active, apiKey, onUseOwnKey }: Props) {
   const [questions, setQuestions] = useState<string[]>([]);
   const [lastBuild, setLastBuild] = useState<BuildOptions | undefined>(undefined);
   const [prompt, setPrompt] = useState<FiveStepPrompt | null>(null);
+  const [plan, setPlan] = useState<StoryPlan | null>(null);
   const [storyboard, setStoryboard] = useState<Storyboard | null>(null);
   const [story, setStory] = useState<Story | null>(null);
   // Bumped for every newly generated video, so step 3 starts fresh each time.
@@ -45,6 +52,7 @@ export default function Studio({ kind, active, apiKey, onUseOwnKey }: Props) {
   const [error, setError] = useState<ErrorInfo | null>(null);
 
   const hasResult = kind === "story" ? story !== null : storyboard !== null;
+  const hasBrief = kind === "story" ? plan !== null : prompt !== null;
 
   const goTo = (next: Step) => {
     setError(null);
@@ -57,18 +65,19 @@ export default function Studio({ kind, active, apiKey, onUseOwnKey }: Props) {
     setBusy("prompt");
     setError(null);
     setLastBuild(options);
+    const request = { description, ...options };
+    const sendOptions = { apiKey: apiKey || undefined };
     try {
-      const result = await postJson(
-        "/api/prompt",
-        { description, kind, ...options },
-        BuildPromptResponseSchema,
-        { apiKey: apiKey || undefined },
-      );
+      const result =
+        kind === "story"
+          ? await postJson("/api/plan", request, PlanResponseSchema, sendOptions)
+          : await postJson("/api/prompt", request, BuildPromptResponseSchema, sendOptions);
       if (result.status === "needs_clarification") {
         setQuestions(result.questions);
       } else {
         setQuestions([]);
-        setPrompt(result.prompt);
+        if ("plan" in result) setPlan(result.plan);
+        else setPrompt(result.prompt);
         goTo("prompt");
       }
     } catch (err) {
@@ -79,13 +88,13 @@ export default function Studio({ kind, active, apiKey, onUseOwnKey }: Props) {
   };
 
   const generate = async () => {
-    if (!prompt) return;
+    if (kind === "story" ? !plan : !prompt) return;
     setBusy("result");
     setError(null);
     const options = { apiKey: apiKey || undefined, timeoutMs: 75_000 };
     try {
       if (kind === "story") {
-        const result = await postJson("/api/story", { prompt }, StoryResponseSchema, options);
+        const result = await postJson("/api/story", { plan }, StoryResponseSchema, options);
         setStory(result.story);
       } else {
         const result = await postJson("/api/storyboard", { prompt }, StoryboardResponseSchema, options);
@@ -104,7 +113,7 @@ export default function Studio({ kind, active, apiKey, onUseOwnKey }: Props) {
     setQuestions([]);
     if (kind === "story") {
       setDescription(SAMPLE_STORY.description);
-      setPrompt(SAMPLE_STORY.prompt);
+      setPlan(SAMPLE_STORY.plan);
       setStory(SAMPLE_STORY.story);
     } else {
       setDescription(SAMPLE.description);
@@ -121,6 +130,7 @@ export default function Studio({ kind, active, apiKey, onUseOwnKey }: Props) {
     setDescription("");
     setQuestions([]);
     setPrompt(null);
+    setPlan(null);
     setStoryboard(null);
     setStory(null);
     goTo("describe");
@@ -139,7 +149,8 @@ export default function Studio({ kind, active, apiKey, onUseOwnKey }: Props) {
     <>
       <Stepper
         current={step}
-        available={{ describe: true, prompt: prompt !== null, video: hasResult }}
+        briefLabel={kind === "story" ? "Plan" : "Prompt"}
+        available={{ describe: true, prompt: hasBrief, video: hasResult }}
         onSelect={goTo}
       />
 
@@ -164,9 +175,21 @@ export default function Studio({ kind, active, apiKey, onUseOwnKey }: Props) {
         />
       )}
 
-      {step === "prompt" && (
+      {step === "prompt" && kind === "story" && plan && (
+        <PlanStep
+          plan={plan}
+          onChange={setPlan}
+          busy={busy === "result"}
+          error={error}
+          hasResult={hasResult}
+          onBack={() => goTo("describe")}
+          onGenerate={generate}
+          onUseOwnKey={onUseOwnKey}
+        />
+      )}
+
+      {step === "prompt" && kind === "explainer" && (
         <PromptStep
-          kind={kind}
           prompt={prompt ?? EMPTY_PROMPT}
           onChange={setPrompt}
           busy={busy === "result"}
@@ -178,7 +201,7 @@ export default function Studio({ kind, active, apiKey, onUseOwnKey }: Props) {
         />
       )}
 
-      {/* Step 3 stays mounted while hidden, so pictures and recordings survive a trip back to the prompt. */}
+      {/* Step 3 stays mounted while hidden, so pictures and recordings survive a trip back to step 2. */}
       {kind === "explainer" && storyboard && (
         <div hidden={step !== "video"}>
           <VideoStep
@@ -194,16 +217,16 @@ export default function Studio({ kind, active, apiKey, onUseOwnKey }: Props) {
           />
         </div>
       )}
-      {kind === "story" && story && (
+      {kind === "story" && story && plan && (
         <div hidden={step !== "video"}>
           <StoryStep
             key={generation}
-            prompt={prompt ?? EMPTY_PROMPT}
+            plan={plan}
             story={story}
             active={showingVideo}
             apiKey={apiKey}
             onStoryChange={updateStory}
-            onBackToPrompt={() => goTo("prompt")}
+            onBackToPlan={() => goTo("prompt")}
             onStartOver={startOver}
             onUseOwnKey={onUseOwnKey}
           />

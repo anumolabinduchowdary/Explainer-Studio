@@ -163,8 +163,8 @@ describe("normalizeStory", () => {
     ]);
   });
 
-  it("keeps at most three characters on screen and hands extra lines to the narrator", () => {
-    const characters = ["a", "b", "c", "d"].map((id) => ({
+  it("keeps at most five characters on screen and hands extra lines to the narrator", () => {
+    const characters = ["a", "b", "c", "d", "e", "f"].map((id) => ({
       id,
       name: id,
       look: `Character ${id}`,
@@ -180,14 +180,15 @@ describe("normalizeStory", () => {
           {
             id: "s",
             locationId: "clinic",
-            onStage: ["a", "b", "c", "d"],
+            onStage: characters.map((c) => c.id),
             lines: characters.map((c) => ({ speaker: c.id, text: `I am ${c.id}` })),
           },
         ],
       }),
     );
-    expect(story.scenes[0].onStage).toEqual(["c1", "c2", "c3"]);
-    expect(story.scenes[0].lines.at(-1)).toEqual({ speaker: NARRATOR, text: "I am d" });
+    expect(story.characters).toHaveLength(6);
+    expect(story.scenes[0].onStage).toEqual(["c1", "c2", "c3", "c4", "c5"]);
+    expect(story.scenes[0].lines.at(-1)).toEqual({ speaker: NARRATOR, text: "I am f" });
   });
 
   it("ends a health story with the disclaimer, exactly once, spoken by the narrator", () => {
@@ -437,7 +438,10 @@ describe("voices", () => {
   it("validates speech requests", () => {
     expect(SpeechRequestSchema.safeParse({ text: "Hello!", voice: "sage" }).success).toBe(true);
     expect(SpeechRequestSchema.safeParse({ text: "  ", voice: "sage" }).success).toBe(false);
-    expect(SpeechRequestSchema.safeParse({ text: "Hello!", voice: "robot" }).success).toBe(false);
+    // Voice names depend on the voice service, so the server checks them when the line is spoken.
+    expect(SpeechRequestSchema.safeParse({ text: "Hello!", voice: "Neerja" }).success).toBe(true);
+    expect(SpeechRequestSchema.safeParse({ text: "Hello!", voice: "" }).success).toBe(false);
+    expect(SpeechRequestSchema.safeParse({ text: "Hello!", voice: "x".repeat(81) }).success).toBe(false);
   });
 
   function fakeSpeech(bytes = new Uint8Array([1, 2, 3])) {

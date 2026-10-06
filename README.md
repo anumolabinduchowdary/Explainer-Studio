@@ -10,14 +10,16 @@ There are two sections:
 
 - **Explainer videos**: animated text with simple built-in illustrations.
 - **Cartoon stories**: talking characters and backgrounds drawn by AI, with AI voices and
-  word-by-word captions. See [Cartoon stories](#cartoon-stories).
+  word-by-word captions. Step 2 is a **story plan** instead of a prompt: a list of the
+  characters and places you asked for. See [Cartoon stories](#cartoon-stories).
 
 **How it works**
 
 1. **Describe**: type what the video is about, who it is for and how it should feel, or press
    **Speak instead of typing** and say it in any language.
 2. **Prompt**: the app writes a five-part prompt (Act as, Goal, Context, Constraints, Output).
-   You can edit every part and see the exact text that will be sent.
+   You can edit every part and see the exact text that will be sent. (Cartoon stories show a
+   story plan here instead.)
 3. **Video**: OpenAI writes the storyboard. The app draws it with animated text and simple
    illustrations. Edit, reorder, delete or rewrite scenes, then create the video and download.
 
@@ -59,7 +61,10 @@ the download with the built-in example.
 | `OPENAI_IMAGE_MODEL` | For Cartoon stories | The image model, for example `gpt-image-2.5-flare`. It must support transparent backgrounds. |
 | `OPENAI_IMAGE_EDIT_MODEL` | No | Model used to redraw a character with its mouth open. Defaults to `OPENAI_IMAGE_MODEL`. |
 | `OPENAI_IMAGE_QUALITY` | No | `low`, `medium` or `high`. Higher costs more and takes longer. |
-| `OPENAI_SPEECH_MODEL` | For voices | The text-to-speech model, for example `gpt-4o-mini-tts`. |
+| `OPENAI_SPEECH_MODEL` | For voices, unless SpeechGen is used | The text-to-speech model, for example `gpt-4o-mini-tts`. |
+| `SPEECHGEN_API_TOKEN` | No | Your [SpeechGen](https://speechgen.io) API token. Set it together with `SPEECHGEN_EMAIL` to use SpeechGen's voices instead of OpenAI's. Server-side only. See [SpeechGen voices](#speechgen-voices). |
+| `SPEECHGEN_EMAIL` | With the token | The email address of the SpeechGen account. |
+| `SPEECHGEN_ACCENT` | No | The accent to prefer when a language has several: `Indian` (the default), `US`, `British`… |
 | `OPENAI_TRANSCRIBE_MODEL` | For speaking | The speech-to-text model behind "Speak instead of typing", for example `gpt-transcribe`. |
 | `OPENAI_MODERATION_MODEL` | No | Defaults to `omni-moderation-latest`. |
 | `RATE_LIMIT_PER_MINUTE` | No | Text requests allowed per IP address per minute. Default `10`. |
@@ -77,11 +82,23 @@ the download with the built-in example.
 
 ## Cartoon stories
 
-A cartoon story is a short conversation between up to four characters, in up to four places.
+A cartoon story is a short conversation between up to six characters, in up to three places.
+Up to five characters can be on screen together; a group that is too wide for the frame
+stands in two rows, taller people at the back.
 
-1. **Describe** and **Prompt** work as for explainer videos.
-2. OpenAI writes the story: the characters and places (each with a description of what to
-   draw), the scenes, and who says what.
+1. **Describe** who is in the story, where it happens and what it should teach, for example
+   "4 children in a physiotherapy centre with their physiotherapist".
+2. **Plan**: the app turns that into a story plan and shows it for checking:
+   - **Characters**: one entry for every person you described (here, four children and one
+     adult), each with a name, who they are, an age and what they look like.
+   - **Places**: where it happens (here, the physiotherapy centre).
+   - **Message**: what the video should teach.
+   - **Details**: length, shape, language, tone and anything to include or avoid.
+
+   Change, add or remove anything, then click **Write the story**. OpenAI writes the scenes
+   and the lines, and picks a voice for each character. It is not asked for the cast: the
+   server copies the characters and places from your plan, so the story always has exactly
+   the people and places you agreed to (see [The story plan](#the-story-plan)).
 3. Click **Draw the pictures**. For each character the image model draws a cut-out with a
    transparent background, then a second version with the mouth open. For each place it draws
    a background. The app places the characters in the background, makes the speaker bounce
@@ -98,7 +115,8 @@ Things to know:
   is drawn a second time with a hand raised, and switches to that pose now and then while
   speaking. Untick it for the whole story, or per character, if a gesture drawing looks wrong.
 - **Cost**: each character needs 4 pictures with gestures (2 without) and each background 1,
-  so a typical story with 3 characters and 3 places is 15 pictures (9 without gestures).
+  so a story with 3 characters and 3 places is 15 pictures (9 without gestures), and one with
+  5 characters and 1 place is 21. The plan shows this number before anything is written.
   Nothing is drawn until you click the button. See
   [OpenAI's pricing](https://openai.com/api/pricing/) for the cost per picture.
 - **Check every picture.** AI drawings can get details wrong, for example hands or the shape
@@ -109,11 +127,12 @@ Things to know:
 - **Pictures are not saved.** They live in the page's memory, like everything else. Reloading
   the page clears them, and they would need to be drawn (and paid for) again.
 - **Say that the voices are AI.** OpenAI requires a clear statement to listeners that the
-  voices are AI-generated and not real people. Put it in the caption or description wherever
+  voices are AI-generated and not real people, and it is good practice with any voice service. Put it in the caption or description wherever
   you share the video.
 - **Voices cost per line.** One request per spoken line, so about 15 for the example story.
   Editing a line, or changing a character's voice, means recording that line again.
-- **Children and older people.** OpenAI's 13 voices are all adults. The **Age** setting
+- **Children and older people.** With [SpeechGen voices](#speechgen-voices) switched on,
+  English stories use real children's and older voices. OpenAI's 13 voices are all adults. The **Age** setting
   (Child, Teenager, Adult, Older person) gets closer in two ways at once: the voice is asked
   to act that age, and the recording is played back faster or slower, which raises or lowers
   its pitch (a child about 20% higher, a teenager 8% higher, an older person 7% lower). The
@@ -154,13 +173,16 @@ Good to know:
 
 - `OPENAI_API_KEY` is read only on the server (`lib/server/handler.ts`). It is never sent to
   the browser and never written to logs. The home page only learns *whether* a key exists.
-- Every OpenAI call goes through the three server routes in `app/api/`.
+- Every OpenAI call goes through the server routes in `app/api/`.
+- The SpeechGen token (`SPEECHGEN_API_TOKEN`), if you use one, is handled the same way: read
+  on the server only, sent to SpeechGen in the body of a POST request, and never logged, put
+  in a web address or sent to the browser. Visitors cannot supply their own.
 - **Use my own key** (the "API key" button): the key is kept in the page's memory only. It is
   not saved to localStorage, cookies or the URL. It is sent over HTTPS in a request header,
   used for that one request and then discarded. The server refuses it over plain HTTP (except
   on `localhost`).
-- Error messages from OpenAI are never passed through to users or logs, because they can
-  repeat part of a key.
+- Error messages from OpenAI and SpeechGen are never passed through to users or logs,
+  because they can repeat part of a key.
 
 ## Sharing to Instagram, YouTube and other apps
 
@@ -213,10 +235,66 @@ the text box, where they can be corrected before building the prompt.
 - The language is detected automatically.
 - The button does not appear in browsers that cannot record sound.
 
+### SpeechGen voices
+
+OpenAI's voices are all adults. [SpeechGen](https://speechgen.io) has real children's voices
+(girls and boys) and older voices in English, and voices for Hindi, Telugu, Tamil and many
+other languages. To use it:
+
+1. Get the API token from your SpeechGen profile page.
+2. Add `SPEECHGEN_API_TOKEN` and `SPEECHGEN_EMAIL` (the email you log in to SpeechGen with) to
+   the server settings: in Vercel under **Settings → Environment Variables**, or in
+   `.env.local` on your own computer. Never paste the token into the page, a chat or the code.
+3. Redeploy (or restart the app).
+
+The Voices panel then lists SpeechGen's voices for the story's language and each line is
+charged to the SpeechGen account. Remove the two settings to go back to OpenAI's voices.
+
+How voices are chosen:
+
+- The list is narrowed to the story's language, in the accent set by `SPEECHGEN_ACCENT`
+  (`Indian` by default, so an English story gets English (Indian) voices).
+- A character marked as a child gets a real child's voice when the language has one, and a
+  grandfather gets an older man's voice. Today only English (US, British, Australian) has
+  children's voices, so **children in an English story speak with an American or British
+  accent** while the adults keep the Indian one. If you prefer one accent throughout, pick an
+  Indian voice for the child in the Voices panel and leave the age on Child: the pitch is
+  then raised, as it is with OpenAI's voices.
+- Languages without children's voices (Hindi, Telugu, Tamil…) always use that method.
+- Everyone gets a different voice while there are enough to go round. You can change any
+  voice and press **Listen**.
+
+Things to know:
+
+- Each line's text is sent to SpeechGen to be spoken. Lines are still screened by OpenAI's
+  moderation first, so an OpenAI key is needed as before.
+- SpeechGen has no "manner of speaking" instruction. The "How they sound" box is used only
+  when the chosen voice has a matching style, such as "cheerful".
+- Voices differ in price; SpeechGen's own site lists the cost of each.
+- The token is sent to SpeechGen in the body of each request from the server. It is never
+  logged, put in a web address or sent to the browser (`lib/server/speechgen.ts`).
+
+### The story plan
+
+Earlier versions used the five-part prompt for cartoon stories too. The cast was then only a
+sentence inside the prompt, so "4 children and a physiotherapist" could come back as two or
+three characters. Now:
+
+- `POST /api/plan` turns the description into the plan (`lib/plan.ts`). The instructions tell
+  the model to create exactly the people described, one character each, and exactly the
+  place named.
+- `POST /api/story` takes the plan. The model returns only the title, the scenes, the lines
+  and a voice for each character id. `buildStoryFromPlan` (`lib/server/normalizePlan.ts`)
+  then builds the story around the plan's own characters and places. A line given to someone
+  who is not in the plan is read by the narrator, and anyone the script forgot is still put
+  on screen.
+- A character's age sets their size on screen and the age of their voice.
+- The edited plan goes through moderation again before the story is written.
+
 ## Safety and quality
 
 - **Moderation**: everything people type goes through OpenAI's moderation endpoint before any
-  text is generated, including the edited prompt and rewrite notes.
+  text is generated, including the edited prompt, the edited story plan and rewrite notes.
 - **Validation**: every model answer is requested with Structured Outputs and then checked
   with Zod. If it fails, the app retries once and then shows a friendly error.
 - **Respectful language**: the storyboard instructions ask for accurate, respectful, inclusive
@@ -235,7 +313,8 @@ the text box, where they can be corrected before building the prompt.
 
 - [`examples/cerebral-palsy.prompt.json`](examples/cerebral-palsy.prompt.json): the five-part prompt
 - [`examples/cerebral-palsy.storyboard.json`](examples/cerebral-palsy.storyboard.json): the 12-scene, 120-second storyboard
-- [`examples/cerebral-palsy.story.json`](examples/cerebral-palsy.story.json): a cartoon story on the same topic, with 3 characters, 3 places and 5 scenes
+- [`examples/cerebral-palsy.plan.json`](examples/cerebral-palsy.plan.json): the story plan for a cartoon story on the same topic, with 3 characters and 3 places
+- [`examples/cerebral-palsy.story.json`](examples/cerebral-palsy.story.json): the cartoon story written from that plan, in 5 scenes
 
 These files were written by hand to show the exact formats the app uses. They are not saved
 OpenAI responses, and a real run will word things differently. They also power the
@@ -274,16 +353,19 @@ app/
   api/prompt/route.ts      Description -> five-part prompt, or up to 3 questions
   api/storyboard/route.ts  Five-part prompt -> storyboard
   api/scene/route.ts       Rewrite one scene
-  api/story/route.ts       Five-part prompt -> cartoon story script
+  api/plan/route.ts        Description -> story plan (characters, places, message, details)
+  api/story/route.ts       Story plan -> cartoon story script
   api/image/route.ts       Draw one picture (character, talking pose or background)
-  api/speech/route.ts      Speak one line in a character's voice
+  api/speech/route.ts      Speak one line in a character's voice (OpenAI or SpeechGen)
+  api/voices/route.ts      The voices that can be chosen for a story's language
   api/transcribe/route.ts  Write down a spoken description
 components/
   AppShell.tsx             Header, the two section tabs, API key panel
   Studio.tsx               The three-step flow and its state, for one section
   DescribeStep.tsx         Text box, example chips, clarifying questions
   SpeakButton.tsx          Microphone button: record, send, add the words to the text box
-  PromptStep.tsx           Five editable cards, live preview, Copy
+  PromptStep.tsx           Explainer step 2: five editable cards, live preview, Copy
+  PlanStep.tsx             Cartoon step 2: the characters, places, message and details
   VideoStep.tsx            Explainer step 3: player, scene editor, recording
   StoryStep.tsx            Cartoon step 3: draws pictures, player, recording
   StoryPictures.tsx        Characters and backgrounds: describe, draw, redraw
@@ -297,10 +379,12 @@ components/
 lib/
   schemas.ts               Zod schemas for prompts, storyboards and the API
   prompt.ts                The five parts and how they are assembled
+  plan.ts                  The story plan: its format, limits and plain-text version
   visuals.ts, visualArt.ts The illustration library (IDs and SVG artwork)
   renderer.ts              Draws any moment of a storyboard on a canvas
   story.ts                 Cartoon story format, timing and caption rules
   storyRenderer.ts         Draws any moment of a cartoon story on a canvas
+  voices.ts                Voice lists, and giving each character a voice of the right gender and age
   storyPictures.ts         Requests pictures and voices and prepares pictures for drawing
   storyAudio.ts            Plays voice clips in step with the picture and feeds the recording
   endCard.ts               The closing QR card added to the end of every video

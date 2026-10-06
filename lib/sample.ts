@@ -1,6 +1,8 @@
+import samplePlanJson from "@/examples/cerebral-palsy.plan.json";
 import samplePromptJson from "@/examples/cerebral-palsy.prompt.json";
 import sampleStoryJson from "@/examples/cerebral-palsy.story.json";
 import sampleStoryboardJson from "@/examples/cerebral-palsy.storyboard.json";
+import { StoryPlanSchema } from "./plan";
 import { FiveStepPromptSchema, StoryboardSchema, type VideoKind } from "./schemas";
 import { StorySchema } from "./story";
 
@@ -37,9 +39,9 @@ export const EXAMPLES: Record<VideoKind, readonly Example[]> = {
         "A 40-second vertical cartoon for primary school children where a teacher helps the class welcome a new classmate who uses a wheelchair. Cheerful and kind.",
     },
     {
-      label: "The brain explains therapy",
+      label: "Four friends at physiotherapy",
       description:
-        "A 45-second vertical cartoon where a friendly talking brain explains to a child why daily therapy exercises help. Playful and encouraging.",
+        "A 60-second vertical cartoon with 4 children in a physiotherapy centre and their physiotherapist, showing that exercises can be fun. Playful and encouraging.",
     },
   ],
 };
@@ -58,12 +60,6 @@ export const SAMPLE = {
 
 export const SAMPLE_STORY = {
   description: EXAMPLES.story[0].description,
-  prompt: FiveStepPromptSchema.parse({
-    ...samplePromptJson,
-    output:
-      "A 45-second, 9:16 vertical cartoon story in 5 scenes with 3 characters: a friendly doctor, a mother and her young son who uses a walker.",
-    constraints:
-      'Length: about 45 seconds. Shape: vertical 9:16. Show the child as active, capable and included. Use person-first language such as "children with cerebral palsy". Avoid pity, fear, blame and miracle-cure claims. No statistics. No diagnosis or treatment advice. End with the line: "For awareness, not medical advice."',
-  }),
+  plan: StoryPlanSchema.parse(samplePlanJson),
   story: StorySchema.parse(sampleStoryJson),
 };

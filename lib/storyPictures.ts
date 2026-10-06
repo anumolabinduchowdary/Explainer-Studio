@@ -8,6 +8,7 @@ import {
   type SpeechRequest,
 } from "./story";
 import type { Sprite } from "./storyRenderer";
+import { VoicesResponseSchema, type VoiceList } from "./voices";
 
 /** One AI-drawn picture, as the app keeps it (in memory only). */
 export type Picture = {
@@ -128,7 +129,8 @@ async function retryWhenBusy<T>(run: () => Promise<T>, options: RequestOptions):
       return await run();
     } catch (err) {
       const info = toErrorInfo(err);
-      const busy = info.code === "rate_limited" || info.code === "upstream_busy";
+      const busy =
+        info.code === "rate_limited" || info.code === "upstream_busy" || info.code === "voice_busy";
       if (!busy || attempt >= 3 || options.shouldStop?.()) throw err;
       const wait = Math.min(65, Math.max(5, info.retryAfterSec ?? 20));
       options.onWaiting?.(wait);
@@ -147,6 +149,11 @@ export function requestPicture(request: ImageRequest, options: RequestOptions = 
     });
     return image;
   }, options);
+}
+
+/** Asks the server which voices can be used for a story in this language. */
+export function requestVoices(language: string): Promise<VoiceList> {
+  return postJson("/api/voices", { language }, VoicesResponseSchema, { timeoutMs: 30_000 });
 }
 
 /** Asks the server to speak one line; resolves to an MP3 data URL. */

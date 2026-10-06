@@ -13,6 +13,10 @@ export const CHARACTER_SIZES = ["small", "medium", "large"] as const;
  * OpenAI's built-in voices. OpenAI does not describe how each one sounds, so
  * the hints below are informal impressions that help pick a sensible default.
  * People choose by listening.
+ *
+ * The story writer always casts from this list. When another voice service is
+ * set up on the server, each choice is swapped for one of that service's
+ * voices of the same gender and age (see lib/voices.ts).
  */
 export const VOICES = [
   { id: "marin", group: "women", hint: "female, warm" },
@@ -37,18 +41,24 @@ export const VOICE_GROUPS = [
 ] as const;
 
 /**
- * Ages. Every OpenAI voice is an adult, so other ages are approximated in two
- * ways at once: the voice is asked to act the age (`manner`), and the finished
+ * Ages. Most voices are adults, so other ages are approximated in two ways at
+ * once: the voice is asked to act the age (`manner`), and the finished
  * recording is played back faster or slower (`rate`), which raises or lowers
- * the pitch the way a smaller or older voice sounds.
+ * the pitch the way a smaller or older voice sounds. `pace` is the speaking
+ * speed asked of services that have a speed control instead of acting
+ * instructions; it offsets the speed-up or slow-down that `rate` causes.
  */
 export const VOICE_AGES = ["child", "teen", "adult", "older"] as const;
 export type VoiceAge = (typeof VOICE_AGES)[number];
 
-export const VOICE_AGE_SETTINGS: Record<VoiceAge, { label: string; rate: number; manner: string }> = {
+export const VOICE_AGE_SETTINGS: Record<
+  VoiceAge,
+  { label: string; rate: number; pace: number; manner: string }
+> = {
   child: {
     label: "Child",
     rate: 1.2,
+    pace: 0.9,
     // A child's voice comes from shorter vocal cords and a smaller throat: higher,
     // lighter and brighter, with less resonance and depth. The pitch shift (rate)
     // supplies the "smaller" sound; these words ask the voice to act the rest.
@@ -61,12 +71,14 @@ export const VOICE_AGE_SETTINGS: Record<VoiceAge, { label: string; rate: number;
   teen: {
     label: "Teenager",
     rate: 1.08,
+    pace: 0.96,
     manner: "a teenager, with a young, lively, casual voice",
   },
-  adult: { label: "Adult", rate: 1, manner: "" },
+  adult: { label: "Adult", rate: 1, pace: 1, manner: "" },
   older: {
     label: "Older person",
     rate: 0.93,
+    pace: 1,
     manner:
       "an elderly person in their seventies, with a gentle, slightly aged voice, warm and unhurried, with small pauses",
   },
@@ -84,15 +96,21 @@ export const STORY_LIMITS = {
   name: 40,
   look: 400,
   lineText: 160,
+  voice: 80,
   voiceStyle: 160,
-  characters: 4,
+  characters: 6,
   locations: 4,
   scenes: 12,
   linesPerScene: 10,
-  onStage: 3,
+  onStage: 5,
 } as const;
 
 const id = z.string().trim().min(1).max(40);
+/**
+ * The name of a voice. Which names exist depends on the voice service the
+ * server uses, so the server checks it when a line is spoken.
+ */
+const voiceName = z.string().trim().min(1).max(STORY_LIMITS.voice);
 
 export const StoryCharacterSchema = z.object({
   id,
@@ -100,7 +118,7 @@ export const StoryCharacterSchema = z.object({
   /** What the artist should draw. */
   look: z.string().trim().max(STORY_LIMITS.look),
   size: z.enum(CHARACTER_SIZES),
-  voice: z.enum(VOICE_IDS),
+  voice: voiceName,
   /** The character's age group, which shapes how the voice is acted and pitched. */
   voiceAge: z.enum(VOICE_AGES),
   /** How the character sounds, in a few words: mood, pace, personality. */
@@ -134,7 +152,7 @@ export const StorySchema = z.object({
   title: z.string().trim().max(STORY_LIMITS.title),
   aspectRatio: z.enum(ASPECT_RATIOS),
   artStyle: z.string().trim().max(STORY_LIMITS.artStyle),
-  narratorVoice: z.enum(VOICE_IDS),
+  narratorVoice: voiceName,
   characters: z.array(StoryCharacterSchema).min(1).max(STORY_LIMITS.characters),
   locations: z.array(StoryLocationSchema).min(1).max(STORY_LIMITS.locations),
   scenes: z.array(StorySceneSchema).min(1).max(STORY_LIMITS.scenes),
@@ -208,7 +226,7 @@ export const ImageResponseSchema = z.object({
 
 export const SpeechRequestSchema = z.object({
   text: z.string().trim().min(1, "There is nothing to say.").max(STORY_LIMITS.lineText),
-  voice: z.enum(VOICE_IDS),
+  voice: voiceName,
   /** How to say it, e.g. "cheerful and proud". */
   style: z.string().trim().max(STORY_LIMITS.voiceStyle).optional(),
   /** The speaker's age group. Defaults to an adult. */
@@ -406,7 +424,7 @@ const NARRATOR_STYLE = "A warm, clear storyteller";
 export function lineVoice(
   story: Story,
   line: StoryLine,
-): { voice: VoiceId; age: VoiceAge; style: string } {
+): { voice: string; age: VoiceAge; style: string } {
   const character = story.characters.find((c) => c.id === line.speaker);
   if (!character) return { voice: story.narratorVoice, age: "adult", style: NARRATOR_STYLE };
   return { voice: character.voice, age: character.voiceAge, style: character.voiceStyle };

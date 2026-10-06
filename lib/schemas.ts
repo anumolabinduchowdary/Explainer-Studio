@@ -133,7 +133,6 @@ export const BuildPromptRequestSchema = z.object({
     .max(3)
     .optional(),
   skipQuestions: z.boolean().optional(),
-  kind: z.enum(VIDEO_KINDS).optional(),
 });
 export type BuildPromptRequest = z.infer<typeof BuildPromptRequestSchema>;
 

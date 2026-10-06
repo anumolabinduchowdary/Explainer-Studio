@@ -5,17 +5,15 @@ import type { ErrorInfo } from "@/lib/errors";
 import {
   NARRATOR,
   STORY_LIMITS,
-  VOICES,
   VOICE_AGES,
   VOICE_AGE_SETTINGS,
-  VOICE_GROUPS,
   clipKey,
   type Story,
   type StoryCharacter,
   type VoiceAge,
-  type VoiceId,
 } from "@/lib/story";
 import type { Clip } from "@/lib/storyAudio";
+import { voiceMenu, type VoiceList, type VoiceOption } from "@/lib/voices";
 import { ErrorNotice } from "./ErrorNotice";
 import { Button, PlayIcon, SparkIcon, inputClass } from "./ui";
 
@@ -48,6 +46,10 @@ type Props = {
   batch: { done: number; total: number } | null;
   /** The speaker whose "Listen" sample is being prepared, if any. */
   listeningTo: string | null;
+  /** The voices that can be chosen, from the voice service the server uses. */
+  voiceList: VoiceList;
+  voiceListState: "loading" | "ready" | "failed";
+  onReloadVoices: () => void;
   onStoryChange: (update: (current: Story) => Story) => void;
   onRecordMissing: () => void;
   onStop: () => void;
@@ -59,6 +61,8 @@ type Props = {
 export function StoryVoices(props: Props) {
   const { story, clips, batch, disabled, onStoryChange } = props;
   const id = useId();
+  const { provider, voices } = props.voiceList;
+  const hasRealAges = voices.some((voice) => voice.age !== "adult");
 
   const needed = clipKeysNeeded(story);
   const ready = needed.filter((key) => clips[key]?.status === "ready").length;
@@ -86,12 +90,21 @@ export function StoryVoices(props: Props) {
       <p className="mt-0.5 text-muted">
         An AI voice speaks each line, and the speaker&apos;s mouth follows the sound. The voices
         are computer-generated, not real people: please say so wherever you share the video. Each
-        line is charged to the OpenAI account in use.
+        line is charged to the {provider === "speechgen" ? "SpeechGen" : "OpenAI"} account in use.
       </p>
       <p className="mt-1 text-muted">
-        All the voices are adults. For a child or an older person, set the age: the voice then
-        acts that age and its pitch is raised or lowered to match. Press Listen to check it.
+        {hasRealAges
+          ? "Voices listed under children or older voices really are that age. For any other voice, set the age: its pitch is then raised or lowered to match. Press Listen to check it."
+          : "All the voices are adults. For a child or an older person, set the age: the voice then acts that age and its pitch is raised or lowered to match. Press Listen to check it."}
       </p>
+      {props.voiceListState === "failed" && (
+        <div className="mt-2 rounded-xl bg-sun-soft px-3 py-2" role="alert">
+          <p>The list of voices could not be loaded, so voices can&apos;t be recorded yet.</p>
+          <Button compact className="mt-2" onClick={props.onReloadVoices}>
+            Try again
+          </Button>
+        </div>
+      )}
 
       <fieldset disabled={disabled} className="mt-3 min-w-0 space-y-4 disabled:opacity-60">
         <legend className="sr-only">Voices for this story</legend>
@@ -113,9 +126,15 @@ export function StoryVoices(props: Props) {
           </div>
         ) : (
           waiting > 0 && (
-            <Button variant="primary" onClick={props.onRecordMissing}>
+            <Button
+              variant="primary"
+              onClick={props.onRecordMissing}
+              disabled={props.voiceListState !== "ready"}
+            >
               <SparkIcon />
-              {ready === 0 ? "Record the voices" : "Record the remaining lines"} ({waiting})
+              {props.voiceListState === "loading"
+                ? "Getting the voices ready…"
+                : `${ready === 0 ? "Record the voices" : "Record the remaining lines"} (${waiting})`}
             </Button>
           )
         )}
@@ -153,6 +172,8 @@ export function StoryVoices(props: Props) {
           <VoiceRow
             name="Narrator"
             voice={story.narratorVoice}
+            voices={voices}
+            canListen={props.voiceListState === "ready"}
             busy={props.listeningTo === NARRATOR}
             onVoiceChange={(voice) => onStoryChange((current) => ({ ...current, narratorVoice: voice }))}
             onListen={() => props.onListen(NARRATOR)}
@@ -162,6 +183,8 @@ export function StoryVoices(props: Props) {
               key={character.id}
               name={character.name || "Character"}
               voice={character.voice}
+              voices={voices}
+              canListen={props.voiceListState === "ready"}
               age={character.voiceAge}
               onAgeChange={(voiceAge) => updateCharacter(character.id, { voiceAge })}
               style={character.voiceStyle}
@@ -179,19 +202,23 @@ export function StoryVoices(props: Props) {
 
 type RowProps = {
   name: string;
-  voice: VoiceId;
+  voice: string;
+  voices: ReadonlyArray<VoiceOption>;
+  /** False until the list of voices has arrived. */
+  canListen: boolean;
   /** Characters have an age and a manner of speaking; the narrator does not. */
   age?: VoiceAge;
   onAgeChange?: (age: VoiceAge) => void;
   style?: string;
   busy: boolean;
-  onVoiceChange: (voice: VoiceId) => void;
+  onVoiceChange: (voice: string) => void;
   onStyleChange?: (style: string) => void;
   onListen: () => void;
 };
 
 function VoiceRow(props: RowProps) {
   const id = useId();
+  const listed = props.voices.some((voice) => voice.id === props.voice);
   return (
     <li className="rounded-2xl border border-line bg-surface p-3 shadow-sm">
       <p className="font-display text-lg font-bold">{props.name}</p>
@@ -203,21 +230,29 @@ function VoiceRow(props: RowProps) {
           <select
             id={`${id}-voice`}
             value={props.voice}
-            onChange={(event) => props.onVoiceChange(event.target.value as VoiceId)}
+            onChange={(event) => props.onVoiceChange(event.target.value)}
             className={`${inputClass} min-h-11`}
           >
-            {VOICE_GROUPS.map((group) => (
-              <optgroup key={group.id} label={group.label}>
-                {VOICES.filter((voice) => voice.group === group.id).map((voice) => (
+            {/* Shown only until the speaker has been given a voice from this list. */}
+            {!listed && <option value={props.voice}>{props.voice}</option>}
+            {voiceMenu(props.voices).map((group) => (
+              <optgroup key={group.label} label={group.label}>
+                {group.voices.map((voice) => (
                   <option key={voice.id} value={voice.id}>
-                    {voice.id[0].toUpperCase() + voice.id.slice(1)} ({voice.hint})
+                    {voice.label}
                   </option>
                 ))}
               </optgroup>
             ))}
           </select>
         </div>
-        <Button compact loading={props.busy} onClick={props.onListen} aria-label={`Listen to ${props.name}`}>
+        <Button
+          compact
+          loading={props.busy}
+          disabled={!props.canListen}
+          onClick={props.onListen}
+          aria-label={`Listen to ${props.name}`}
+        >
           {!props.busy && <PlayIcon />}
           Listen
         </Button>

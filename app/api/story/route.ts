@@ -1,18 +1,18 @@
-import { StoryboardRequestSchema } from "@/lib/schemas";
-import { StoryWireSchema } from "@/lib/story";
+import { StoryFromPlanRequestSchema, StoryFromPlanWireSchema } from "@/lib/plan";
 import { createPostHandler } from "@/lib/server/handler";
-import { normalizeStory } from "@/lib/server/normalizeStory";
+import { buildStoryFromPlan } from "@/lib/server/normalizePlan";
 import { generateStructured, moderate } from "@/lib/server/openai";
-import { STORY_INSTRUCTIONS, storyboardInput } from "@/lib/server/systemPrompts";
+import { STORY_INSTRUCTIONS, storyInput } from "@/lib/server/systemPrompts";
 
 export const maxDuration = 60;
 
-/** 5-step prompt -> cartoon story script (characters, places, scenes and lines). */
+/** Story plan -> cartoon story script. The cast and places come from the plan; the model writes the lines. */
 export const POST = createPostHandler({
   route: "api/story",
-  schema: StoryboardRequestSchema,
+  schema: StoryFromPlanRequestSchema,
   async run({ body, client, signal }) {
-    const input = storyboardInput(body.prompt);
+    const input = storyInput(body.plan);
+    // The plan is edited by the user, so it is checked again before anything is written from it.
     await moderate(client, input, signal);
 
     const story = await generateStructured({
@@ -20,8 +20,8 @@ export const POST = createPostHandler({
       name: "cartoon_story",
       instructions: STORY_INSTRUCTIONS,
       input,
-      schema: StoryWireSchema,
-      refine: normalizeStory,
+      schema: StoryFromPlanWireSchema,
+      refine: (wire) => buildStoryFromPlan(body.plan, wire),
       maxOutputTokens: 12000,
       signal,
     });

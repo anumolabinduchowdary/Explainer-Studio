@@ -13,7 +13,19 @@ export type BuildOptions = {
   skipQuestions?: boolean;
 };
 
-const COPY: Record<VideoKind, { title: string; help: string; placeholder: string; sample: string; sampleNote: string }> = {
+type Copy = {
+  title: string;
+  help: string;
+  placeholder: string;
+  sample: string;
+  sampleNote: string;
+  build: string;
+  building: string;
+  working: string;
+  questionsHelp: string;
+};
+
+const COPY: Record<VideoKind, Copy> = {
   explainer: {
     title: "Describe your video",
     help: "Say what it is about, who it is for and how it should feel. One or two sentences is enough.",
@@ -21,14 +33,22 @@ const COPY: Record<VideoKind, { title: string; help: string; placeholder: string
       "e.g. A 60-second video for new parents about why tummy time matters, gentle and encouraging.",
     sample: "Open a ready-made example video",
     sampleNote: "(no key needed).",
+    build: "Build my prompt",
+    building: "Building your prompt…",
+    working: "Working on your prompt. This can take a few seconds.",
+    questionsHelp: "Your answers help the AI write a better prompt. Skip any you are not sure about.",
   },
   story: {
     title: "Describe your cartoon story",
-    help: "Say what it is about, who it is for and who should appear in it. The AI writes the dialogue and draws the characters.",
+    help: "Say who is in it, where it happens and what it should teach. For example: 4 children in a physiotherapy centre with their physiotherapist. You can check and change the characters on the next step.",
     placeholder:
-      "e.g. A 45-second cartoon where a kind therapist shows a father three simple exercises to do with his daughter at home.",
+      "e.g. A 45-second cartoon with 4 children in a physiotherapy centre and their physiotherapist, showing that exercises can be fun.",
     sample: "Open a ready-made example story",
     sampleNote: "(no key needed; the pictures are only drawn with a key).",
+    build: "Plan my story",
+    building: "Planning your story…",
+    working: "Planning your story. This can take a few seconds.",
+    questionsHelp: "Your answers help the AI plan your story. Skip any you are not sure about.",
   },
 };
 
@@ -155,7 +175,7 @@ export function DescribeStep(props: Props) {
           <div className="mt-6">
             <Button variant="primary" type="submit" loading={busy} className="w-full sm:w-auto">
               {!busy && <SparkIcon />}
-              {busy ? "Building your prompt…" : "Build my prompt"}
+              {busy ? copy.building : copy.build}
             </Button>
           </div>
         )}
@@ -166,12 +186,13 @@ export function DescribeStep(props: Props) {
           key={questions.join("|")}
           questions={questions}
           busy={busy}
+          copy={copy}
           onBuild={props.onBuild}
         />
       )}
 
       <div aria-live="polite" className="sr-only">
-        {busy ? "Working on your prompt. This can take a few seconds." : ""}
+        {busy ? copy.working : ""}
       </div>
 
       {error && (
@@ -201,10 +222,12 @@ export function DescribeStep(props: Props) {
 function Questions({
   questions,
   busy,
+  copy,
   onBuild,
 }: {
   questions: string[];
   busy: boolean;
+  copy: Copy;
   onBuild: (options?: BuildOptions) => void;
 }) {
   const baseId = useId();
@@ -229,7 +252,7 @@ function Questions({
           A few quick questions
         </h2>
         <p className="mt-1 text-ink">
-          Your answers help the AI write a better prompt. Skip any you are not sure about.
+          {copy.questionsHelp}
         </p>
         <ol className="mt-4 space-y-4">
           {questions.map((question, i) => (
@@ -252,7 +275,7 @@ function Questions({
         </ol>
         <div className="mt-5 flex flex-wrap gap-2">
           <Button variant="primary" type="submit" loading={busy}>
-            {busy ? "Building your prompt…" : "Build my prompt"}
+            {busy ? copy.building : copy.build}
           </Button>
           <Button disabled={busy} onClick={() => onBuild({ skipQuestions: true })}>
             Skip the questions

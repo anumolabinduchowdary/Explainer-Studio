@@ -6,13 +6,11 @@ import { downloadText, slugify } from "@/lib/download";
 import type { ExportJob } from "@/lib/exportVideo";
 import { useEndCardImage, withEndCard } from "@/lib/endCard";
 import { HEALTH_DISCLAIMER } from "@/lib/config";
-import { assemblePrompt } from "@/lib/prompt";
+import { assemblePlan, type StoryPlan } from "@/lib/plan";
 import { suggestCaption } from "@/lib/share";
 import { dimensionsFor } from "@/lib/renderer";
-import type { FiveStepPrompt } from "@/lib/schemas";
 import {
   NARRATOR,
-  VOICE_AGE_SETTINGS,
   clipKey,
   estimateLine,
   lineStarts,
@@ -30,6 +28,7 @@ import {
   referencePng,
   requestPicture,
   requestSpeech,
+  requestVoices,
   type PictureMap,
   type PictureState,
 } from "@/lib/storyPictures";
@@ -41,6 +40,7 @@ import {
   type StoryRenderAssets,
 } from "@/lib/storyRenderer";
 import { useRecording } from "@/lib/useRecording";
+import { OPENAI_VOICE_LIST, ageRate, castVoices, type VoiceList } from "@/lib/voices";
 import { useCanvasFonts } from "@/lib/useRenderAssets";
 import { ExportPanel } from "./ExportPanel";
 import { Player, type DrawFunction, type PlayerHandle, type Transport } from "./Player";
@@ -56,13 +56,14 @@ const VOICE_PAUSE_SEC = 0.35;
 type Batch = { done: number; total: number } | null;
 
 type Props = {
-  prompt: FiveStepPrompt;
+  /** The plan the story was written from, offered as a download. */
+  plan: StoryPlan;
   story: Story;
   /** False while another step or section is showing (this one stays mounted to keep its pictures). */
   active: boolean;
   apiKey: string;
   onStoryChange: (update: (current: Story) => Story) => void;
-  onBackToPrompt: () => void;
+  onBackToPlan: () => void;
   onStartOver: () => void;
   onUseOwnKey: () => void;
 };
@@ -87,7 +88,7 @@ async function runJobs(
 
 /** Step 3 for cartoon stories: draw the pictures, record the voices, watch, edit and download. */
 export function StoryStep(props: Props) {
-  const { prompt, story, apiKey, onStoryChange } = props;
+  const { plan, story, apiKey, onStoryChange } = props;
   const headingRef = useRef<HTMLHeadingElement>(null);
   const playerRef = useRef<PlayerHandle>(null);
   const audioRef = useRef<StoryAudio | null>(null);
@@ -124,14 +125,17 @@ export function StoryStep(props: Props) {
   const [voiceBatch, setVoiceBatch] = useState<Batch>(null);
   const [listeningTo, setListeningTo] = useState<string | null>(null);
   const [activeIndex, setActiveIndex] = useState(0);
+  // Which voices exist depends on the voice service the server uses, so the list is asked for.
+  const [voiceList, setVoiceList] = useState<VoiceList>(OPENAI_VOICE_LIST);
+  const [voiceListState, setVoiceListState] = useState<"loading" | "ready" | "failed">("loading");
 
   // Drawing and recording take a while, so the jobs read the latest values through refs.
-  const live = useRef({ story, apiKey, pictures, clips, gesturesOn });
+  const live = useRef({ story, apiKey, pictures, clips, gesturesOn, voiceList });
   const aliveRef = useRef(true);
   const stopPicturesRef = useRef(false);
   const stopVoicesRef = useRef(false);
   useEffect(() => {
-    live.current = { story, apiKey, pictures, clips, gesturesOn };
+    live.current = { story, apiKey, pictures, clips, gesturesOn, voiceList };
   });
   useEffect(() => {
     aliveRef.current = true;
@@ -458,6 +462,36 @@ export function StoryStep(props: Props) {
 
   /* ---------------- Voices ---------------- */
 
+  /**
+   * Fetches the voices for the story's language. A story is first cast with
+   * OpenAI's voices; if the server speaks with another service, every speaker
+   * is given one of that service's voices of the same gender and age.
+   */
+  // The language the lines were written in: fixed when the story arrives, whatever happens to the plan later.
+  const [language] = useState(plan.language);
+  const [voiceAttempt, setVoiceAttempt] = useState(0);
+  useEffect(() => {
+    let cancelled = false;
+    requestVoices(language).then(
+      (list) => {
+        if (cancelled) return;
+        setVoiceList(list);
+        setVoiceListState("ready");
+        onStoryChange((current) => castVoices(current, list.voices));
+      },
+      () => {
+        if (!cancelled) setVoiceListState("failed");
+      },
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [language, onStoryChange, voiceAttempt]);
+  const loadVoices = () => {
+    setVoiceListState("loading");
+    setVoiceAttempt((attempt) => attempt + 1);
+  };
+
   const setClip = useCallback(
     (key: string, state: ClipState) => {
       if (!aliveRef.current) return;
@@ -484,7 +518,9 @@ export function StoryStep(props: Props) {
             shouldStop: () => !aliveRef.current || stopVoicesRef.current,
           },
         );
-        const clip = await audio.decode(dataUrl, VOICE_AGE_SETTINGS[age].rate);
+        // A real child's or older person's voice is left as it is; an adult voice is pitched to the age.
+        const option = live.current.voiceList.voices.find((item) => item.id === voice);
+        const clip = await audio.decode(dataUrl, ageRate(age, option));
         setClip(key, { status: "ready", clip });
         return clip;
       } catch (err) {
@@ -606,8 +642,9 @@ export function StoryStep(props: Props) {
             onDownloadStoryboard={() =>
               downloadText(`${fileBase}.story.json`, JSON.stringify(story, null, 2), "application/json")
             }
+            promptLabel="Plan (.txt)"
             onDownloadPrompt={() =>
-              downloadText(`${fileBase}.prompt.txt`, assemblePrompt(prompt), "text/plain")
+              downloadText(`${fileBase}.plan.txt`, assemblePlan(plan), "text/plain")
             }
           />
         </div>
@@ -675,6 +712,9 @@ export function StoryStep(props: Props) {
             disabled={isRecording}
             batch={voiceBatch}
             listeningTo={listeningTo}
+            voiceList={voiceList}
+            voiceListState={voiceListState}
+            onReloadVoices={loadVoices}
             onStoryChange={changeStory}
             onRecordMissing={recordMissing}
             onStop={() => {
@@ -698,8 +738,8 @@ export function StoryStep(props: Props) {
           />
 
           <div className="flex flex-wrap gap-2 border-t border-line pt-5">
-            <Button disabled={isRecording} onClick={props.onBackToPrompt}>
-              Back to prompt
+            <Button disabled={isRecording} onClick={props.onBackToPlan}>
+              Back to plan
             </Button>
             <Button variant="ghost" disabled={isRecording} onClick={props.onStartOver}>
               Start a new story

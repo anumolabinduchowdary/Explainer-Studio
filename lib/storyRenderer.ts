@@ -2,6 +2,7 @@ import { dimensionsFor, type Dimensions, type FrameOptions } from "./renderer";
 import {
   NARRATOR,
   SCENE_LEAD_SEC,
+  STORY_LIMITS,
   captionChunks,
   characterName,
   estimateLine,
@@ -14,8 +15,8 @@ import {
 } from "./story";
 
 /**
- * Draws a cartoon story: a background, up to three characters standing in
- * it, and word-by-word captions. The speaker bounces and (when a talking
+ * Draws a cartoon story: a background, up to five characters standing in
+ * it (a bigger group stands in two rows), and word-by-word captions. The speaker bounces and (when a talking
  * pose has been drawn) opens and closes their mouth.
  *
  * Like the explainer renderer, one function paints any moment, and both the
@@ -63,6 +64,8 @@ type Layout = {
   heights: Record<StoryCharacter["size"], number>;
   captionY: number;
   captionSize: number;
+  /** How much higher the back row stands when a group needs two rows. */
+  rowLift: number;
 };
 
 function layoutFor({ width: W, height: H }: Dimensions): Layout {
@@ -72,6 +75,7 @@ function layoutFor({ width: W, height: H }: Dimensions): Layout {
       heights: { large: 0.62, medium: 0.52, small: 0.41 },
       captionY: 0.82,
       captionSize: H * 0.085,
+      rowLift: 0.08,
     };
   }
   if (W === H) {
@@ -80,6 +84,7 @@ function layoutFor({ width: W, height: H }: Dimensions): Layout {
       heights: { large: 0.56, medium: 0.47, small: 0.37 },
       captionY: 0.79,
       captionSize: W * 0.072,
+      rowLift: 0.08,
     };
   }
   // Tall videos keep the bottom clear, where phone apps put their own buttons and titles.
@@ -88,11 +93,93 @@ function layoutFor({ width: W, height: H }: Dimensions): Layout {
     heights: { large: 0.5, medium: 0.42, small: 0.33 },
     captionY: 0.735,
     captionSize: W * 0.092,
+    rowLift: 0.09,
   };
 }
 
-const SLOTS: Record<number, number[]> = { 1: [0.5], 2: [0.29, 0.71], 3: [0.2, 0.5, 0.8] };
-const SLOT_WIDTH: Record<number, number> = { 1: 0.8, 2: 0.46, 3: 0.32 };
+/* ------------------------------------------------------------------ */
+/* Where everyone stands                                               */
+/* ------------------------------------------------------------------ */
+
+const SLOTS: Record<number, number[]> = {
+  1: [0.5],
+  2: [0.29, 0.71],
+  3: [0.2, 0.5, 0.8],
+  4: [0.14, 0.38, 0.62, 0.86],
+  5: [0.11, 0.305, 0.5, 0.695, 0.89],
+};
+const SLOT_WIDTH: Record<number, number> = { 1: 0.8, 2: 0.46, 3: 0.32, 4: 0.25, 5: 0.2 };
+
+/**
+ * Two rows, like a group photo, keyed by "people at the back + people at the
+ * front". The back row stands in the gaps of the front row where it can.
+ */
+const ROWS: Record<string, { back: number[]; front: number[]; backWidth: number; frontWidth: number }> = {
+  "1+3": { back: [0.5], front: [0.2, 0.5, 0.8], backWidth: 0.5, frontWidth: 0.3 },
+  "2+2": { back: [0.2, 0.8], front: [0.38, 0.62], backWidth: 0.36, frontWidth: 0.25 },
+  "3+1": { back: [0.2, 0.5, 0.8], front: [0.5], backWidth: 0.32, frontWidth: 0.3 },
+  "1+4": { back: [0.5], front: [0.14, 0.38, 0.62, 0.86], backWidth: 0.5, frontWidth: 0.24 },
+  "2+3": { back: [0.35, 0.65], front: [0.2, 0.5, 0.8], backWidth: 0.3, frontWidth: 0.3 },
+  "3+2": { back: [0.2, 0.5, 0.8], front: [0.35, 0.65], backWidth: 0.32, frontWidth: 0.28 },
+};
+/** When everyone is a similar height, who steps back, so left-to-right still follows the cast order. */
+const STEP_BACK: Record<number, number[]> = { 4: [0, 3, 1, 2], 5: [1, 3, 0, 2, 4] };
+
+const SIZE_RANK: Record<StoryCharacter["size"], number> = { small: 0, medium: 1, large: 2 };
+/** A typical character is a little under half as wide as they are tall. */
+const TYPICAL_ASPECT = 0.45;
+
+export type StagePlace = {
+  /** Centre of the character, as a fraction of the width. */
+  x: number;
+  /** "back" characters stand a little higher and are painted first. */
+  row: "front" | "back";
+  /** The widest the character may be, as a fraction of the width. */
+  maxWidth: number;
+};
+
+/**
+ * Decides where each character on screen stands. Up to three share one row.
+ * Four or five share a row when the frame is wide enough, and otherwise form
+ * two rows with the taller characters behind, so every face stays in view.
+ */
+export function arrangeStage(
+  cast: ReadonlyArray<Pick<StoryCharacter, "size">>,
+  dims: Dimensions,
+): StagePlace[] {
+  const n = Math.min(cast.length, STORY_LIMITS.onStage);
+  const people = cast.slice(0, n);
+  const oneRow = () =>
+    people.map((_, i) => ({ x: SLOTS[n][i], row: "front" as const, maxWidth: SLOT_WIDTH[n] }));
+  if (n <= 3) return oneRow();
+
+  const { heights } = layoutFor(dims);
+  const needed = people.reduce(
+    (sum, person) => sum + (heights[person.size] * dims.height * TYPICAL_ASPECT) / dims.width,
+    0,
+  );
+  if (needed <= 1.1) return oneRow();
+
+  const tall = people.flatMap((person, i) => (person.size === "small" ? [] : [i]));
+  let back: number[];
+  if (tall.length >= 1 && tall.length <= 3 && tall.length < n) {
+    back = tall;
+  } else {
+    // Everyone is a similar height: two step back, the tallest first.
+    back = [...STEP_BACK[n]]
+      .sort((a, b) => SIZE_RANK[people[b].size] - SIZE_RANK[people[a].size])
+      .slice(0, 2)
+      .sort((a, b) => a - b);
+  }
+  const pattern = ROWS[`${back.length}+${n - back.length}`];
+  let backSeat = 0;
+  let frontSeat = 0;
+  return people.map((_, i) =>
+    back.includes(i)
+      ? { x: pattern.back[backSeat++], row: "back" as const, maxWidth: pattern.backWidth }
+      : { x: pattern.front[frontSeat++], row: "front" as const, maxWidth: pattern.frontWidth },
+  );
+}
 
 /* ------------------------------------------------------------------ */
 /* Background                                                          */
@@ -138,7 +225,7 @@ function drawBackdrop(
 /* Characters                                                          */
 /* ------------------------------------------------------------------ */
 
-const PLACEHOLDER_COLOURS = ["#F9A8D4", "#93C5FD", "#FCD34D", "#86EFAC"];
+const PLACEHOLDER_COLOURS = ["#F9A8D4", "#93C5FD", "#FCD34D", "#86EFAC", "#C4B5FD", "#FDBA74"];
 
 /** A friendly stand-in shown until a character's picture has been drawn. */
 function drawPlaceholderCharacter(
@@ -272,40 +359,49 @@ export function drawStoryFrame(
   const cast = scene.onStage
     .map((id) => story.characters.find((character) => character.id === id))
     .filter((character): character is StoryCharacter => Boolean(character))
-    .slice(0, 3);
-  const slots = SLOTS[cast.length] ?? [];
-  const maxWidth = W * (SLOT_WIDTH[cast.length] ?? 0.8);
+    .slice(0, STORY_LIMITS.onStage);
+  const places = arrangeStage(cast, dims);
   const arrive = settled ? 1 : easeOutCubic(clamp01(moment.sceneLocal / (SCENE_LEAD_SEC * 0.9)));
 
-  // The speaker is painted last, so a raised hand is never hidden behind a neighbour.
+  // The back row is painted first. Within a row the speaker is painted last,
+  // so a raised hand is never hidden behind a neighbour.
   const paintOrder = cast
     .map((character, i) => ({ character, i }))
-    .sort((a, b) => Number(a.character.id === speakerId) - Number(b.character.id === speakerId));
+    .sort(
+      (a, b) =>
+        Number(places[a.i].row === "front") - Number(places[b.i].row === "front") ||
+        Number(a.character.id === speakerId) - Number(b.character.id === speakerId),
+    );
 
   paintOrder.forEach(({ character, i }) => {
     const sprites = assets.characters.get(character.id);
     const isSpeaker = character.id === speakerId;
     const aspect = sprites ? sprites.idle.width / sprites.idle.height : 0.42;
 
-    let h = H * layout.heights[character.size];
+    const place = places[i];
+    const atBack = place.row === "back";
+    const floor = layout.floor - (atBack ? layout.rowLift : 0);
+    const maxWidth = W * place.maxWidth;
+    // People further away look a touch smaller.
+    let h = H * layout.heights[character.size] * (atBack ? 0.95 : 1);
     let w = h * aspect;
     if (w > maxWidth) {
       h *= maxWidth / w;
       w = maxWidth;
     }
 
-    const x = W * slots[i];
-    const facing = slots[i] > 0.5 ? -1 : 1; // pictures are drawn facing right
+    const x = W * place.x;
+    const facing = place.x > 0.5 ? -1 : 1; // pictures are drawn facing right
     const bounce = isSpeaker && speaking ? -Math.abs(Math.sin(moment.lineLocal * Math.PI * 2.4)) * h * 0.018 : 0;
     const breathe = settled ? 1 : 1 + 0.006 * Math.sin(time * 1.7 + i * 1.3);
-    const y = H * layout.floor + bounce + (1 - arrive) * h * 0.08;
+    const y = H * floor + bounce + (1 - arrive) * h * 0.08;
 
     ctx.save();
     ctx.globalAlpha = arrive;
 
     ctx.fillStyle = "rgba(31, 20, 16, 0.18)";
     ctx.beginPath();
-    ctx.ellipse(x, H * layout.floor, w * 0.36, Math.max(6, h * 0.022), 0, 0, Math.PI * 2);
+    ctx.ellipse(x, H * floor, w * 0.36, Math.max(6, h * 0.022), 0, 0, Math.PI * 2);
     ctx.fill();
 
     ctx.translate(x, y);

@@ -14,6 +14,10 @@ export const ERROR_CODES = [
   "bad_model_output",
   "refused",
   "insecure_transport",
+  "voice_key_invalid",
+  "voice_credit",
+  "voice_unavailable",
+  "voice_busy",
   "server_error",
 ] as const;
 
@@ -89,6 +93,23 @@ export const ERROR_COPY: Record<ErrorCode, { title: string; message: string }> =
   insecure_transport: {
     title: "A secure connection is needed",
     message: "Your own key can only be sent over HTTPS. Open the site with https:// and try again.",
+  },
+  voice_key_invalid: {
+    title: "The voice service rejected its key",
+    message:
+      "SpeechGen did not accept the token or email in the server settings. Check SPEECHGEN_API_TOKEN and SPEECHGEN_EMAIL, then redeploy.",
+  },
+  voice_credit: {
+    title: "The voice account is out of credit",
+    message: "The SpeechGen account has no balance left. Top it up at speechgen.io, then try again.",
+  },
+  voice_unavailable: {
+    title: "That voice can't be used",
+    message: "The voice service doesn't have this voice. Choose another voice and try again.",
+  },
+  voice_busy: {
+    title: "The voice service is busy",
+    message: "The voice service couldn't take the request. Please wait a few seconds and try again.",
   },
   server_error: {
     title: "Something went wrong",

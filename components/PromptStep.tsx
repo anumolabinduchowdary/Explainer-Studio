@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { ErrorInfo } from "@/lib/errors";
 import { PROMPT_STEPS, assemblePrompt, type PromptStepKey } from "@/lib/prompt";
-import { FiveStepPromptSchema, LIMITS, type FiveStepPrompt, type VideoKind } from "@/lib/schemas";
+import { FiveStepPromptSchema, LIMITS, type FiveStepPrompt } from "@/lib/schemas";
 import { ErrorNotice } from "./ErrorNotice";
 import { Button, Card, CheckIcon, CopyIcon, SparkIcon, inputClass } from "./ui";
 
@@ -12,8 +12,6 @@ type Props = {
   onChange: (prompt: FiveStepPrompt) => void;
   busy: boolean;
   error: ErrorInfo | null;
-  /** What step 3 makes: a storyboard (explainer) or a story (cartoon). */
-  kind: VideoKind;
   /** True once step 3 has been generated at least once. */
   hasResult: boolean;
   onBack: () => void;
@@ -60,7 +58,7 @@ export function PromptStep(props: Props) {
   const [submitted, setSubmitted] = useState(false);
   const [copyState, setCopyState] = useState<"idle" | "copied" | "failed">("idle");
 
-  const noun = props.kind === "story" ? "story" : "storyboard";
+  const noun = "storyboard";
   const errors = useMemo(() => validate(prompt), [prompt]);
   const assembled = useMemo(() => assemblePrompt(prompt), [prompt]);
 

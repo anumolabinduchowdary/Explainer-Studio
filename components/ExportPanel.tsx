@@ -18,6 +18,8 @@ type Props = {
   onDownloadPrompt: () => void;
   /** Label for the script download, e.g. "Storyboard (.json)". */
   scriptLabel?: string;
+  /** Label for the text download: the prompt for explainer videos, the plan for cartoon stories. */
+  promptLabel?: string;
   /** Shown above the record button, e.g. when pictures are still missing. */
   notice?: string;
   /** When set, recording is not possible yet and this explains why. */
@@ -133,7 +135,7 @@ export function ExportPanel(props: Props) {
             </Button>
             <Button compact disabled={recording} onClick={props.onDownloadPrompt}>
               <DownloadIcon />
-              Prompt (.txt)
+              {props.promptLabel ?? "Prompt (.txt)"}
             </Button>
           </div>
         </div>

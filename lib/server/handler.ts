@@ -16,13 +16,10 @@ type Context<Body> = {
   signal: AbortSignal;
 };
 
-type HandlerConfig<Schema extends z.ZodType> = {
+type SharedConfig<Schema extends z.ZodType> = {
   /** Used in log lines only. */
   route: string;
   schema: Schema;
-  run: (context: Context<z.infer<Schema>>) => Promise<object>;
-  /** Tests can inject a fake OpenAI client. */
-  clientFactory?: (apiKey: string) => OpenAIClient;
   /** Routes that share a name share one per-IP allowance. Default: "text". */
   rateLimit?: { bucket: string; perMinute: () => number };
   /** How long the route may run. Must stay under its `maxDuration`. */
@@ -30,11 +27,39 @@ type HandlerConfig<Schema extends z.ZodType> = {
   maxBodyChars?: number;
 };
 
+type HandlerConfig<Schema extends z.ZodType> = SharedConfig<Schema> & {
+  run: (context: Context<z.infer<Schema>>) => Promise<object>;
+  /** Tests can inject a fake OpenAI client. */
+  clientFactory?: (apiKey: string) => OpenAIClient;
+};
+
+type KeylessConfig<Schema extends z.ZodType> = SharedConfig<Schema> & {
+  run: (context: Omit<Context<z.infer<Schema>>, "client">) => Promise<object>;
+};
+
 /**
  * Wraps a route with everything every OpenAI-backed endpoint needs:
  * per-IP rate limiting, body validation, API key resolution and safe errors.
  */
 export function createPostHandler<Schema extends z.ZodType>(config: HandlerConfig<Schema>) {
+  return handle(config, (req, body, signal) => {
+    const client = (config.clientFactory ?? createClient)(resolveApiKey(req));
+    return config.run({ body, client, signal });
+  });
+}
+
+/**
+ * The same protection for a route that does not call OpenAI and so needs no
+ * key, such as listing the voices that can be chosen.
+ */
+export function createKeylessPostHandler<Schema extends z.ZodType>(config: KeylessConfig<Schema>) {
+  return handle(config, (_req, body, signal) => config.run({ body, signal }));
+}
+
+function handle<Schema extends z.ZodType>(
+  config: SharedConfig<Schema>,
+  run: (req: Request, body: z.infer<Schema>, signal: AbortSignal) => Promise<object>,
+) {
   return async function POST(req: Request): Promise<Response> {
     try {
       const bucket = config.rateLimit?.bucket ?? "text";
@@ -45,14 +70,12 @@ export function createPostHandler<Schema extends z.ZodType>(config: HandlerConfi
       }
 
       const body = await readBody(req, config.schema, config.maxBodyChars ?? DEFAULT_MAX_BODY_CHARS);
-      const apiKey = resolveApiKey(req);
-      const client = (config.clientFactory ?? createClient)(apiKey);
       const signal = AbortSignal.any([
         req.signal,
         AbortSignal.timeout(config.deadlineMs ?? DEFAULT_DEADLINE_MS),
       ]);
 
-      const result = await config.run({ body, client, signal });
+      const result = await run(req, body, signal);
       return Response.json(result, { headers: { "Cache-Control": "no-store" } });
     } catch (err) {
       const appError = toAppError(err);

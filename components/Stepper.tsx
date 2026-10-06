@@ -10,12 +10,14 @@ const STEPS: Array<{ id: Step; label: string }> = [
 
 type Props = {
   current: Step;
+  /** What step 2 is called: "Prompt" for explainer videos, "Plan" for cartoon stories. */
+  briefLabel?: string;
   /** Steps the user can jump to (they already have the data for them). */
   available: Record<Step, boolean>;
   onSelect: (step: Step) => void;
 };
 
-export function Stepper({ current, available, onSelect }: Props) {
+export function Stepper({ current, briefLabel, available, onSelect }: Props) {
   const currentIndex = STEPS.findIndex((step) => step.id === current);
   return (
     <nav aria-label="Steps" className="my-5">
@@ -48,7 +50,7 @@ export function Stepper({ current, available, onSelect }: Props) {
                 </span>
                 <span className="min-w-0">
                   <span className="sr-only">Step {index + 1}: </span>
-                  {step.label}
+                  {step.id === "prompt" && briefLabel ? briefLabel : step.label}
                   {done && <span className="sr-only"> (done)</span>}
                 </span>
               </button>

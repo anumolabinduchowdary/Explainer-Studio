@@ -10,6 +10,7 @@ const NO_RETRY: ReadonlySet<ErrorCode> = new Set([
   "missing_key",
   "server_misconfigured",
   "insecure_transport",
+  "voice_key_invalid",
 ]);
 
 type Props = {

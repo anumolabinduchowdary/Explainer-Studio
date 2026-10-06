@@ -4,7 +4,7 @@ import { useId } from "react";
 import { ASPECT_RATIOS, LIMITS, type AspectRatio } from "@/lib/schemas";
 import { inputClass } from "./ui";
 
-const SHAPE_LABELS: Record<AspectRatio, string> = {
+export const SHAPE_LABELS: Record<AspectRatio, string> = {
   "9:16": "Tall (9:16)",
   "16:9": "Wide (16:9)",
   "1:1": "Square (1:1)",
