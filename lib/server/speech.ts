@@ -12,15 +12,26 @@ function speechModel(): string {
   return model;
 }
 
-/** How we ask the voice to perform a line. */
-export function speechInstructions(style: string | undefined, age: VoiceAge = "adult"): string {
+/**
+ * How we ask the voice to perform a line. Written like a director's note to an
+ * actor: the aim is a real person talking to someone in front of them, not a
+ * voice reading text aloud, which is what makes speech sound robotic.
+ */
+export function speechInstructions(
+  style: string | undefined,
+  age: VoiceAge = "adult",
+  delivery?: string,
+): string {
   const manner = style?.trim();
   const ageManner = VOICE_AGE_SETTINGS[age].manner;
+  const line = delivery?.trim();
   return [
-    "You are voicing one character in a short, friendly cartoon for families.",
-    ageManner ? `The character is ${ageManner}.` : "",
-    manner ? `The character sounds like this: ${manner}.` : "",
-    "Speak naturally and clearly at an easy pace, with warmth. Say only the words given, in the language they are written in.",
+    "You are a voice actor playing one character in a warm cartoon for families. Speak as a real person talking to someone right in front of you, not as an announcer and not as if reading aloud.",
+    ageManner ? `Character: ${ageManner}.` : "",
+    manner ? `Personality: ${manner}.` : "",
+    line ? `This line: ${line}.` : "",
+    "Delivery: natural and expressive, with the rise and fall of everyday conversation. Stress the words that matter, let questions sound like real questions, smile when the words are happy, and take small natural pauses at commas. Never flat or monotone.",
+    "Say only the words given, in the language they are written in, with the natural accent and pronunciation of a native speaker of that language.",
   ]
     .filter(Boolean)
     .join(" ");
@@ -41,7 +52,7 @@ export async function generateSpeech(
       voice: request.voice,
       input: request.text,
       response_format: "mp3",
-      ...(steerable ? { instructions: speechInstructions(request.style, request.age) } : {}),
+      ...(steerable ? { instructions: speechInstructions(request.style, request.age, request.delivery) } : {}),
     },
     { signal },
   );

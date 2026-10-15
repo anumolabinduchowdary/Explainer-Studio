@@ -3,7 +3,15 @@ import { HEALTH_DISCLAIMER, SOCIAL_HANDLE } from "@/lib/config";
 import { generatePicture, imagePrompt } from "@/lib/server/images";
 import type { OpenAIClient } from "@/lib/server/openai";
 import { suggestCaption } from "@/lib/share";
-import { ImageRequestSchema, isGesturing, pictureKey, type ImageRequest } from "@/lib/story";
+import {
+  GESTURE_BLEND_SEC,
+  ImageRequestSchema,
+  NO_GESTURE,
+  gestureAt,
+  gestureSpans,
+  pictureKey,
+  type ImageRequest,
+} from "@/lib/story";
 
 const PNG = "data:image/png;base64,iVBORw0KGgo=";
 const request = (overrides: Partial<ImageRequest> = {}): ImageRequest => ({
@@ -55,29 +63,64 @@ describe("hand gestures", () => {
       pictureKey.talking("c1"),
       pictureKey.gesture("c1"),
       pictureKey.gestureTalking("c1"),
+      pictureKey.explain("c1"),
+      pictureKey.explainTalking("c1"),
     ];
-    expect(new Set(keys).size).toBe(4);
+    expect(new Set(keys).size).toBe(6);
   });
+
+  const longLine = { speaker: "c1", text: "Starting therapy early helps children build strength, balance and confidence every day." };
+  const longTiming = { duration: 6, speechStart: 0.2, speechEnd: 5.6 };
+  const sample = (poses: number) =>
+    Array.from({ length: 54 }, (_, i) => gestureAt(longLine, 0.2 + i * 0.1, longTiming, poses));
 
   it("comes and goes while a long line is spoken, the same way every time", () => {
-    const line = { speaker: "c1", text: "Starting therapy early helps children build strength and skills." };
-    const timing = { duration: 5, speechStart: 0.2, speechEnd: 4.6 };
-    const samples = Array.from({ length: 44 }, (_, i) => isGesturing(line, 0.2 + i * 0.1, timing));
-    const share = samples.filter(Boolean).length / samples.length;
-    expect(share).toBeGreaterThan(0.3);
-    expect(share).toBeLessThan(0.7);
-    // No flickering: a gesture, once started, lasts about a second.
-    const changes = samples.filter((on, i) => i > 0 && on !== samples[i - 1]).length;
-    expect(changes).toBeLessThanOrEqual(4);
-    expect(samples).toEqual(Array.from({ length: 44 }, (_, i) => isGesturing(line, 0.2 + i * 0.1, timing)));
+    const samples = sample(2);
+    const raised = samples.filter((moment) => moment.pose !== NO_GESTURE).length / samples.length;
+    expect(raised).toBeGreaterThan(0.3);
+    expect(raised).toBeLessThan(0.8);
+    expect(sample(2)).toEqual(samples);
+    // Each gesture lasts most of a second or more, with rests between, inside the spoken part.
+    const spans = gestureSpans(longLine, longTiming, 2);
+    expect(spans.length).toBeGreaterThanOrEqual(2);
+    for (const [i, span] of spans.entries()) {
+      expect(span.end - span.start).toBeGreaterThan(0.5);
+      expect(span.start).toBeGreaterThanOrEqual(longTiming.speechStart);
+      expect(span.end).toBeLessThanOrEqual(longTiming.speechEnd);
+      if (i > 0) expect(span.start - spans[i - 1].end).toBeGreaterThanOrEqual(0.4);
+    }
   });
 
-  it("holds or skips the gesture for the whole of a short line", () => {
+  it("uses both gesture poses when a character has two, and only real poses", () => {
+    const poses = new Set(
+      ["One two three four five six seven eight nine ten eleven twelve.", "Look at how strong your legs are getting now!", "We can practise together every single morning."]
+        .flatMap((text) => gestureSpans({ speaker: "c1", text }, longTiming, 2).map((span) => span.pose)),
+    );
+    expect([...poses].sort()).toEqual([0, 1]);
+    expect(gestureSpans(longLine, longTiming, 1).every((span) => span.pose === 0)).toBe(true);
+    expect(gestureSpans(longLine, longTiming, 0)).toEqual([]);
+  });
+
+  it("blends smoothly into and out of each gesture instead of jumping", () => {
+    const [span] = gestureSpans(longLine, longTiming, 2);
+    const starting = gestureAt(longLine, span.start + GESTURE_BLEND_SEC / 2, longTiming, 2);
+    expect(starting).toMatchObject({ pose: span.pose, from: NO_GESTURE });
+    expect(starting.blend).toBeCloseTo(0.5, 5);
+    expect(gestureAt(longLine, span.start + GESTURE_BLEND_SEC * 2, longTiming, 2)).toEqual({ pose: span.pose, from: NO_GESTURE, blend: 1 });
+    const ending = gestureAt(longLine, span.end + GESTURE_BLEND_SEC / 2, longTiming, 2);
+    expect(ending).toMatchObject({ pose: NO_GESTURE, from: span.pose });
+    expect(ending.blend).toBeCloseTo(0.5, 5);
+  });
+
+  it("gives a short line one gesture through its middle, or none", () => {
     const timing = { duration: 1.4, speechStart: 0, speechEnd: 0.9 };
-    for (const text of ["Hi!", "Watch me!", "No."]) {
-      const line = { speaker: "c1", text };
-      const samples = [0, 0.3, 0.6, 0.85].map((t) => isGesturing(line, t, timing));
-      expect(new Set(samples).size).toBe(1);
+    for (const text of ["Hi!", "Watch me!", "No.", "Yes!", "Me too!"]) {
+      const spans = gestureSpans({ speaker: "c1", text }, timing, 2);
+      expect(spans.length).toBeLessThanOrEqual(1);
+      for (const span of spans) {
+        expect(span.start).toBeGreaterThan(0);
+        expect(span.end).toBeLessThan(0.9);
+      }
     }
   });
 });

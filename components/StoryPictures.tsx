@@ -8,6 +8,7 @@ import {
   type Story,
   type StoryCharacter,
   type StoryLocation,
+  type StoryScene,
 } from "@/lib/story";
 import type { PictureMap, PictureState } from "@/lib/storyPictures";
 import { ErrorNotice } from "./ErrorNotice";
@@ -24,14 +25,18 @@ export const pictureSource = {
   character: (story: Story, character: StoryCharacter) => `${story.artStyle}|${character.look}`,
   place: (story: Story, location: StoryLocation) =>
     `${story.artStyle}|${story.aspectRatio}|${location.look}`,
+  card: (story: Story, scene: StoryScene) => `${story.artStyle}|${scene.card?.look ?? ""}`,
 };
+
+/** The scenes of a home exercise programme that show an exercise card. */
+export const cardScenes = (story: Story) => story.scenes.filter((scene) => scene.card);
 
 export function needsDrawing(state: PictureState | undefined, source: string): boolean {
   if (!state || state.status === "failed") return true;
   return state.status === "ready" && state.picture.source !== source;
 }
 
-/** A character needs drawing if its standing pose (or, with gestures on, its gesture pose) is missing or out of date. */
+/** A character needs drawing if its standing pose (or, with gestures on, a gesture pose) is missing or out of date. */
 export function characterNeedsDrawing(
   story: Story,
   character: StoryCharacter,
@@ -40,7 +45,11 @@ export function characterNeedsDrawing(
 ): boolean {
   const source = pictureSource.character(story, character);
   if (needsDrawing(pictures[pictureKey.character(character.id)], source)) return true;
-  return gesturesOn && needsDrawing(pictures[pictureKey.gesture(character.id)], source);
+  return (
+    gesturesOn &&
+    (needsDrawing(pictures[pictureKey.gesture(character.id)], source) ||
+      needsDrawing(pictures[pictureKey.explain(character.id)], source))
+  );
 }
 
 type Props = {
@@ -61,6 +70,7 @@ type Props = {
   onStoryChange: (update: (current: Story) => Story) => void;
   onDrawCharacter: (characterId: string) => void;
   onDrawPlace: (locationId: string) => void;
+  onDrawCard: (sceneId: string) => void;
   onDrawMissing: () => void;
   onStop: () => void;
   onToggleMouth: (characterId: string) => void;
@@ -71,14 +81,19 @@ export function StoryPictures(props: Props) {
   const { story, pictures, batch, disabled, onStoryChange } = props;
   const id = useId();
 
+  const cards = cardScenes(story);
+  const cardsWaiting = cards.filter((scene) =>
+    needsDrawing(pictures[pictureKey.card(scene.id)], pictureSource.card(story, scene)),
+  ).length;
   const waiting =
     story.characters.filter((character) =>
       characterNeedsDrawing(story, character, pictures, props.gesturesOn),
     ).length +
     story.locations.filter((location) =>
       needsDrawing(pictures[pictureKey.place(location.id)], pictureSource.place(story, location)),
-    ).length;
-  const total = story.characters.length + story.locations.length;
+    ).length +
+    cardsWaiting;
+  const total = story.characters.length + story.locations.length + cards.length;
   // The headline count is about the main pictures; gesture poses are an extra on top.
   const mainWaiting =
     story.characters.filter((character) =>
@@ -86,7 +101,8 @@ export function StoryPictures(props: Props) {
     ).length +
     story.locations.filter((location) =>
       needsDrawing(pictures[pictureKey.place(location.id)], pictureSource.place(story, location)),
-    ).length;
+    ).length +
+    cardsWaiting;
   const anyDrawing = Object.values(pictures).some((state) => state.status === "drawing");
 
   const updateCharacter = (characterId: string, patch: Partial<StoryCharacter>) =>
@@ -160,8 +176,8 @@ export function StoryPictures(props: Props) {
             Hand gestures while talking
           </label>
           <p className="text-sm text-muted">
-            Draws each character a second time with a hand raised, and switches to it now and
-            then while they speak. Adds 2 pictures per character.
+            Draws each character twice more, with a hand raised and with both hands open, and moves
+            between those poses while they speak. Adds 4 pictures per character.
           </p>
         </div>
 
@@ -196,6 +212,7 @@ export function StoryPictures(props: Props) {
                 picture={pictures[pictureKey.character(character.id)]}
                 talking={pictures[pictureKey.talking(character.id)]}
                 gesture={props.gesturesOn ? pictures[pictureKey.gesture(character.id)] : undefined}
+                explain={props.gesturesOn ? pictures[pictureKey.explain(character.id)] : undefined}
                 gestureOn={!props.gestureOff.has(character.id)}
                 onToggleGesture={() => props.onToggleGesture(character.id)}
                 stale={isStale(
@@ -233,6 +250,71 @@ export function StoryPictures(props: Props) {
             ))}
           </ul>
         </div>
+
+        {cards.length > 0 && (
+          <div>
+            <h3 className="font-display text-xl font-bold">Exercise pictures</h3>
+            <p className="text-muted">
+              Each exercise is shown on a card with this picture. Please check each position is
+              right before sharing.
+            </p>
+            <ul className="mt-2 space-y-2">
+              {cards.map((scene) => {
+                const state = pictures[pictureKey.card(scene.id)];
+                const drawing = state?.status === "drawing";
+                return (
+                  <li key={scene.id} className="rounded-2xl border border-line bg-surface p-3 shadow-sm">
+                    <div className="flex gap-3">
+                      <Thumb state={state} alt={`Exercise picture: ${scene.card?.title ?? ""}`} />
+                      <div className="min-w-0 flex-1">
+                        <p className="font-semibold">{scene.card?.title}</p>
+                        <p className="text-sm text-muted">{scene.card?.dose}</p>
+                        <label htmlFor={`${id}-card-${scene.id}`} className="mb-1 mt-2 block font-semibold">
+                          What to draw
+                        </label>
+                        <textarea
+                          id={`${id}-card-${scene.id}`}
+                          value={scene.card?.look ?? ""}
+                          rows={2}
+                          maxLength={STORY_LIMITS.look}
+                          onChange={(event) =>
+                            onStoryChange((current) => ({
+                              ...current,
+                              scenes: current.scenes.map((item) =>
+                                item.id === scene.id && item.card
+                                  ? { ...item, card: { ...item.card, look: event.target.value } }
+                                  : item,
+                              ),
+                            }))
+                          }
+                          className={`${inputClass} field-sizing-content min-h-16 resize-y leading-relaxed`}
+                        />
+                      </div>
+                    </div>
+                    {state?.status === "failed" && (
+                      <ErrorNotice
+                        className="mt-2"
+                        error={state.error}
+                        onRetry={() => props.onDrawCard(scene.id)}
+                        onUseOwnKey={props.onUseOwnKey}
+                      />
+                    )}
+                    <Button
+                      compact
+                      className="mt-3"
+                      loading={drawing}
+                      disabled={batch !== null && !drawing}
+                      onClick={() => props.onDrawCard(scene.id)}
+                    >
+                      {!drawing && <RefreshIcon />}
+                      {drawing ? "Drawing…" : state?.status === "ready" ? "Redraw" : "Draw"}
+                    </Button>
+                  </li>
+                );
+              })}
+            </ul>
+          </div>
+        )}
       </fieldset>
     </section>
   );
@@ -279,8 +361,9 @@ type CharacterCardProps = {
   character: StoryCharacter;
   picture: PictureState | undefined;
   talking: PictureState | undefined;
-  /** The hand-raised pose, when gestures are on for the story. */
+  /** The gesture poses (a hand raised, both hands open), when gestures are on for the story. */
   gesture: PictureState | undefined;
+  explain: PictureState | undefined;
   gestureOn: boolean;
   onToggleGesture: () => void;
   stale: boolean;
@@ -293,10 +376,10 @@ type CharacterCardProps = {
 };
 
 function CharacterCard(props: CharacterCardProps) {
-  const { character, picture, talking, gesture } = props;
+  const { character, picture, talking, gesture, explain } = props;
   const id = useId();
-  const drawing =
-    picture?.status === "drawing" || talking?.status === "drawing" || gesture?.status === "drawing";
+  const drawing = [picture, talking, gesture, explain].some((state) => state?.status === "drawing");
+  const anyGesture = gesture?.status === "ready" || explain?.status === "ready";
   const name = character.name || "This character";
 
   return (
@@ -306,6 +389,9 @@ function CharacterCard(props: CharacterCardProps) {
           <Thumb state={picture} alt={`Drawing of ${name}`} />
           {gesture && picture?.status === "ready" && (
             <Thumb state={gesture} alt={`${name} with a hand raised`} />
+          )}
+          {explain && picture?.status === "ready" && (
+            <Thumb state={explain} alt={`${name} with both hands open, explaining`} />
           )}
         </div>
         <div className="min-w-0 flex-1 space-y-2">
@@ -369,10 +455,12 @@ function CharacterCard(props: CharacterCardProps) {
           onUseOwnKey={props.onUseOwnKey}
         />
       )}
-      {picture?.status === "ready" && gesture?.status === "failed" && (
+      {picture?.status === "ready" && (gesture?.status === "failed" || explain?.status === "failed") && (
         <p className="mt-2 rounded-xl bg-sun-soft px-3 py-2">
-          The hand-gesture pose could not be drawn, so {name} will keep their hands still. Redraw
-          to try again.
+          {anyGesture
+            ? `One of the hand-gesture poses could not be drawn, so ${name} will use fewer gestures.`
+            : `The hand-gesture poses could not be drawn, so ${name} will keep their hands still.`}{" "}
+          Redraw to try again.
         </p>
       )}
       {picture?.status === "ready" && talking?.status === "failed" && (
@@ -398,7 +486,7 @@ function CharacterCard(props: CharacterCardProps) {
             Mouth moves when talking
           </label>
         )}
-        {gesture?.status === "ready" && (
+        {anyGesture && (
           <label className="flex min-h-11 cursor-pointer items-center gap-2">
             <input
               type="checkbox"

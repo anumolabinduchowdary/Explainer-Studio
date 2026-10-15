@@ -11,6 +11,8 @@ type Props = {
   prompt: FiveStepPrompt;
   onChange: (prompt: FiveStepPrompt) => void;
   busy: boolean;
+  /** What the button says while busy, when not the default. */
+  busyLabel?: string;
   error: ErrorInfo | null;
   /** True once step 3 has been generated at least once. */
   hasResult: boolean;
@@ -188,7 +190,7 @@ export function PromptStep(props: Props) {
             <Button variant="primary" type="submit" loading={busy}>
               {!busy && <SparkIcon />}
               {busy
-                ? `Writing your ${noun}…`
+                ? props.busyLabel || `Writing your ${noun}…`
                 : props.hasResult
                   ? `Generate a new ${noun}`
                   : `Generate ${noun}`}

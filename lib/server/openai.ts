@@ -55,6 +55,10 @@ type GenerateOptions<Wire, Result> = {
   name: string;
   instructions: string;
   input: string;
+  /** A picture to look at along with the input, as a data URL. */
+  image?: string;
+  /** A different model than OPENAI_TEXT_MODEL, e.g. for looking at pictures. */
+  model?: string;
   /** The shape OpenAI must return (Structured Outputs). */
   schema: z.ZodType<Wire>;
   /** Applies the stricter app rules. Throw to reject the answer. */
@@ -73,15 +77,26 @@ export async function generateStructured<Wire, Result>(
   options: GenerateOptions<Wire, Result>,
 ): Promise<Result> {
   const { client, name, instructions, schema, refine, maxOutputTokens, signal } = options;
-  const model = textModel();
+  const model = options.model ?? textModel();
   const effort = reasoningEffort();
   let problem = "";
 
   for (let attempt = 1; attempt <= 2; attempt++) {
-    const input =
+    const text =
       attempt === 1
         ? options.input
         : `${options.input}\n\nYour previous answer could not be used (${problem}). Answer again and follow every rule.`;
+    const input = options.image
+      ? [
+          {
+            role: "user" as const,
+            content: [
+              { type: "input_text" as const, text },
+              { type: "input_image" as const, image_url: options.image, detail: "low" as const },
+            ],
+          },
+        ]
+      : text;
 
     let response;
     try {

@@ -24,6 +24,8 @@ const storyboard = (overrides: Partial<StoryboardWire> = {}): StoryboardWire => 
   title: "A title",
   aspectRatio: "9:16",
   isHealthTopic: false,
+  language: "English",
+  disclaimer: "",
   scenes: [scene({ id: "s1" }), scene({ id: "s2" })],
   ...overrides,
 });

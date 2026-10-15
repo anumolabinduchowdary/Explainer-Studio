@@ -5,6 +5,7 @@ import { moderate } from "@/lib/server/openai";
 import { speechPerMinute } from "@/lib/server/rateLimit";
 import { generateSpeech } from "@/lib/server/speech";
 import { speakWithSpeechgen, speechgenCredentials } from "@/lib/server/speechgen";
+import { hearLine, speakAndCheck } from "@/lib/server/voiceCheck";
 
 export const maxDuration = 60;
 
@@ -18,8 +19,14 @@ export const POST = createPostHandler({
     // Lines are editable, so they are screened before they are spoken, whichever service speaks them.
     await moderate(client, [body.text, body.style ?? ""].filter(Boolean).join("\n"), signal);
 
-    if (speechgen) return { audio: await speakWithSpeechgen(speechgen, body, signal) };
-    if (!(VOICE_IDS as readonly string[]).includes(body.voice)) throw new AppError("voice_unavailable", 422);
-    return { audio: await generateSpeech(client, body, signal) };
+    if (!speechgen && !(VOICE_IDS as readonly string[]).includes(body.voice)) throw new AppError("voice_unavailable", 422);
+    const speak = (extraDirection?: string) => {
+      const request = extraDirection
+        ? { ...body, delivery: [body.delivery, extraDirection].filter(Boolean).join(". ").slice(0, 160) }
+        : body;
+      return speechgen ? speakWithSpeechgen(speechgen, request, signal) : generateSpeech(client, request, signal);
+    };
+    // Every line is listened back, and recorded again if the words did not come out right.
+    return speakAndCheck(speak, (audio) => hearLine(client, body.text, audio, body.language, signal));
   },
 });

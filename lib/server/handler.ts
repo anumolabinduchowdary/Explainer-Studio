@@ -3,6 +3,7 @@ import type { z } from "zod";
 import { USER_KEY_HEADER } from "@/lib/config";
 import type { ApiErrorBody } from "@/lib/errors";
 import { AppError, describeForLog, toAppError } from "./appError";
+import { requireUser } from "./auth/session";
 import { createClient, type OpenAIClient } from "./openai";
 import { clientIp, rateLimit, requestsPerMinute } from "./rateLimit";
 
@@ -38,8 +39,9 @@ type KeylessConfig<Schema extends z.ZodType> = SharedConfig<Schema> & {
 };
 
 /**
- * Wraps a route with everything every OpenAI-backed endpoint needs:
- * per-IP rate limiting, body validation, API key resolution and safe errors.
+ * Wraps a route with everything every OpenAI-backed endpoint needs: per-IP
+ * rate limiting, the sign-in check, body validation, API key resolution and
+ * safe errors.
  */
 export function createPostHandler<Schema extends z.ZodType>(config: HandlerConfig<Schema>) {
   return handle(config, (req, body, signal) => {
@@ -68,6 +70,8 @@ function handle<Schema extends z.ZodType>(
       if (!limit.ok) {
         throw new AppError("rate_limited", 429, { retryAfterSec: limit.retryAfterSec });
       }
+      // When sign-in is switched on, nothing here runs for someone who is not signed in.
+      await requireUser(req);
 
       const body = await readBody(req, config.schema, config.maxBodyChars ?? DEFAULT_MAX_BODY_CHARS);
       const signal = AbortSignal.any([

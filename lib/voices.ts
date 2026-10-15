@@ -21,6 +21,12 @@ export const VoiceOptionSchema = z.object({
   gender: z.enum(["female", "male", "neutral"]),
   /** The age the voice really is. Most voices are adults. */
   age: z.enum(["child", "adult", "older"]),
+  /**
+   * A voice in another accent of the story's language (for example an
+   * American child's voice in an Indian English story). Offered in the menu,
+   * but never given out automatically, so a story keeps one accent.
+   */
+  otherAccent: z.boolean().optional(),
 });
 export type VoiceOption = z.infer<typeof VoiceOptionSchema>;
 
@@ -32,6 +38,8 @@ export const VoicesRequestSchema = z.object({
 export const VoicesResponseSchema = z.object({
   provider: z.enum(SPEECH_PROVIDERS),
   voices: z.array(VoiceOptionSchema).min(1).max(300),
+  /** False when the voice service has no good voices for the story's language. */
+  supported: z.boolean(),
 });
 export type VoiceList = z.infer<typeof VoicesResponseSchema>;
 
@@ -44,7 +52,7 @@ export const OPENAI_VOICE_OPTIONS: VoiceOption[] = VOICES.map((voice) => ({
   age: "adult",
 }));
 
-export const OPENAI_VOICE_LIST: VoiceList = { provider: "openai", voices: OPENAI_VOICE_OPTIONS };
+export const OPENAI_VOICE_LIST: VoiceList = { provider: "openai", voices: OPENAI_VOICE_OPTIONS, supported: true };
 
 const MENU_GROUPS: Array<{ label: string; holds: (voice: VoiceOption) => boolean }> = [
   { label: "Children's voices", holds: (voice) => voice.age === "child" },
@@ -114,13 +122,16 @@ export function castVoices(story: Story, voices: ReadonlyArray<VoiceOption>): St
   const known = new Map(voices.map((voice) => [voice.id, voice]));
   const speakers = [story.narratorVoice, ...story.characters.map((character) => character.voice)];
   if (speakers.every((voice) => known.has(voice))) return story;
+  // Voices are given out from the story's own accent; other accents stay in the menu for choosing by hand.
+  const sameAccent = voices.filter((voice) => !voice.otherAccent);
+  const pool = sameAccent.length > 0 ? sameAccent : voices;
 
   const genderOf = (voice: string): VoiceOption["gender"] =>
     OPENAI_VOICE_OPTIONS.find((option) => option.id === voice)?.gender ?? "neutral";
   const taken = new Set(speakers.filter((voice) => known.has(voice)).map(sameVoice));
   const choose = (current: string, age: VoiceAge): string => {
     if (known.has(current)) return current;
-    const picked = pickVoice(voices, { gender: genderOf(current), age }, taken);
+    const picked = pickVoice(pool, { gender: genderOf(current), age }, taken);
     if (!picked) return current;
     taken.add(sameVoice(picked.id));
     return picked.id;

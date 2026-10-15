@@ -66,7 +66,39 @@ export const PlanPlaceSchema = z.object({
 });
 export type PlanPlace = z.infer<typeof PlanPlaceSchema>;
 
+/** The kinds of cartoon video. */
+export const STORY_KINDS = ["story", "social", "exercises"] as const;
+export type StoryKind = (typeof STORY_KINDS)[number];
+export const STORY_KIND_LABELS: Record<StoryKind, string> = {
+  story: "Cartoon story",
+  social: "Social Story",
+  exercises: "Home exercise programme",
+};
+export const THERAPY_TYPES = ["Physiotherapy", "Occupational therapy", "Speech therapy"] as const;
+export const MAX_EXERCISES = 8;
+
+/** One exercise in a home programme, as the therapist set it. */
+export const PlanExerciseSchema = z.object({
+  id,
+  name: z.string().trim().min(1, "Every exercise needs a name.").max(60),
+  /** How to do it, in one to three plain sentences. */
+  steps: z.string().trim().min(3, "Say how to do the exercise.").max(300),
+  /** How much, e.g. "10 times, 2 rounds" or "Hold for 5 seconds, 3 times". */
+  dose: z.string().trim().max(80),
+  /** What the instruction picture shows. */
+  look: z.string().trim().min(3, "Describe the picture of the exercise.").max(PLAN_LIMITS.look),
+  /** A safety note, if the therapist gave one. */
+  caution: z.string().trim().max(160).default(""),
+});
+export type PlanExercise = z.infer<typeof PlanExerciseSchema>;
+
 export const StoryPlanSchema = z.object({
+  /** What kind of video: a story, a Social Story for an autistic child, or a home exercise programme. */
+  kind: z.enum(STORY_KINDS).default("story"),
+  /** Sensory-friendly playback: no flashes, gentler movement, more time between lines. */
+  calm: z.boolean().default(false),
+  /** Home exercise programmes: the exercises, in order. */
+  exercises: z.array(PlanExerciseSchema).max(MAX_EXERCISES).default([]),
   /** What the video should teach or make people feel. */
   message: z
     .string()
@@ -89,6 +121,12 @@ export const StoryPlanSchema = z.object({
   tone: z.string().trim().max(PLAN_LIMITS.tone),
   /** Anything else to include or avoid. */
   notes: z.string().trim().max(PLAN_LIMITS.notes),
+  /**
+   * How the pictures should look, in plain words, as the description asked
+   * (e.g. "soft watercolour cartoon with pastel colours"). Empty means the
+   * app's standard friendly 2D cartoon style.
+   */
+  style: z.string().trim().max(STORY_LIMITS.artStyle).default(""),
 });
 export type StoryPlan = z.infer<typeof StoryPlanSchema>;
 
@@ -109,6 +147,10 @@ export const PlanBuildWireSchema = z.object({
   language: z.string(),
   tone: z.string(),
   notes: z.string(),
+  style: z.string(),
+  exercises: z.array(
+    z.object({ name: z.string(), steps: z.string(), dose: z.string(), look: z.string(), caution: z.string() }),
+  ),
 });
 export type PlanBuildWire = z.infer<typeof PlanBuildWireSchema>;
 
@@ -118,17 +160,20 @@ export type PlanBuildWire = z.infer<typeof PlanBuildWireSchema>;
  */
 export const StoryFromPlanWireSchema = z.object({
   title: z.string(),
-  artStyle: z.string(),
   narratorVoice: z.enum(VOICE_IDS),
   isHealthTopic: z.boolean(),
+  /** The health disclaimer in the plan's language, for languages the app has no translation for. */
+  disclaimer: z.string(),
   voices: z.array(
     z.object({ characterId: z.string(), voice: z.enum(VOICE_IDS), voiceStyle: z.string() }),
   ),
   scenes: z.array(
     z.object({
       locationId: z.string(),
+      /** Home exercise programmes: which exercise this scene shows (0 for the first), or -1 for none. */
+      exercise: z.number(),
       onStage: z.array(z.string()),
-      lines: z.array(z.object({ speaker: z.string(), text: z.string() })),
+      lines: z.array(z.object({ speaker: z.string(), text: z.string(), how: z.string() })),
     }),
   ),
 });
@@ -138,8 +183,28 @@ export type StoryFromPlanWire = z.infer<typeof StoryFromPlanWireSchema>;
 /* API shapes                                                          */
 /* ------------------------------------------------------------------ */
 
-/** Description (plus answers to any questions) -> plan. Same request as the prompt builder. */
-export const PlanRequestSchema = BuildPromptRequestSchema;
+/** Description (plus answers to any questions) -> plan, with the details each kind of video needs. */
+export const PlanRequestSchema = BuildPromptRequestSchema.extend({
+  kind: z.enum(STORY_KINDS).optional(),
+  /** Social Stories: the child the story is for. Only a first name is needed, and no photo. */
+  child: z
+    .object({
+      name: z.string().trim().max(40),
+      age: z.string().trim().max(20),
+      look: z.string().trim().max(300),
+      helps: z.string().trim().max(300),
+    })
+    .optional(),
+  /** Home exercise programmes: the therapy and the exercises, as the therapist wrote them. */
+  therapy: z
+    .object({
+      type: z.string().trim().max(40),
+      who: z.string().trim().max(80),
+      exercises: z.string().trim().max(3000),
+    })
+    .optional(),
+});
+export type PlanRequest = z.infer<typeof PlanRequestSchema>;
 
 export const PlanResponseSchema = z.discriminatedUnion("status", [
   z.object({ status: z.literal("ready"), plan: StoryPlanSchema }),
@@ -171,9 +236,12 @@ export function nextId(prefix: string, used: ReadonlyArray<{ id: string }>): str
   return `${prefix}${n}`;
 }
 
-/** Drawings a plan needs: 4 per character (standing and gesturing, each with the mouth closed and open), 1 per place. */
+/**
+ * Drawings a plan needs: 6 per character (standing, a hand raised and both
+ * hands open, each with the mouth closed and open), 1 per place and 1 per exercise.
+ */
 export function picturesNeeded(plan: StoryPlan): number {
-  return plan.characters.length * 4 + plan.places.length;
+  return plan.characters.length * 6 + plan.places.length + plan.exercises.length;
 }
 
 /** A plain-text version of the plan, for the .txt download and for the story writer. */
@@ -188,14 +256,23 @@ export function assemblePlan(plan: StoryPlan): string {
     `Shape: ${plan.aspectRatio}`,
     plan.language.trim() ? `Language: ${plan.language.trim()}` : "",
     plan.tone.trim() ? `Tone: ${plan.tone.trim()}` : "",
+    `Drawing style: ${plan.style.trim() || "the standard friendly 2D cartoon style"}`,
   ].filter(Boolean);
 
+  const exercises = plan.exercises.map(
+    (exercise, i) =>
+      `- Exercise ${i}: ${exercise.name.trim()}. How: ${exercise.steps.trim()} How much: ${exercise.dose.trim() || "as shown"}.${
+        exercise.caution.trim() ? ` Caution: ${exercise.caution.trim()}` : ""
+      } Picture: ${exercise.look.trim()}`,
+  );
   return [
+    `KIND\n${STORY_KIND_LABELS[plan.kind]}${plan.calm ? " (calm, sensory-friendly)" : ""}`,
     `MESSAGE\n${plan.message.trim()}`,
     `CHARACTERS (${plan.characters.length})\n${cast.join("\n")}`,
     `PLACES (${plan.places.length})\n${places.join("\n")}`,
     `DETAILS\n${details.join("\n")}`,
     plan.notes.trim() ? `NOTES\n${plan.notes.trim()}` : "",
+    exercises.length ? `EXERCISES (${exercises.length}, in this order)\n${exercises.join("\n")}` : "",
   ]
     .filter(Boolean)
     .join("\n\n");

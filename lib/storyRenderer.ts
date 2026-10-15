@@ -6,8 +6,10 @@ import {
   captionChunks,
   characterName,
   estimateLine,
-  isGesturing,
+  gestureAt,
   locateStory,
+  NO_GESTURE,
+  type ExerciseCard,
   type Story,
   type StoryCharacter,
   type StoryLine,
@@ -16,7 +18,9 @@ import {
 
 /**
  * Draws a cartoon story: a background, up to five characters standing in
- * it (a bigger group stands in two rows), and word-by-word captions. The speaker bounces and (when a talking
+ * it (a bigger group stands in two rows), and word-by-word captions. The
+ * speaker talks with their hands, blending smoothly between poses, and the
+ * people listening nod along. The speaker bounces and (when a talking
  * pose has been drawn) opens and closes their mouth.
  *
  * Like the explainer renderer, one function paints any moment, and both the
@@ -37,13 +41,18 @@ export type Sprite = {
 export type CharacterSprites = {
   idle: Sprite;
   talk?: Sprite;
-  /** A second pose with a hand raised, used in stretches while the character talks. */
-  gesture?: { idle: Sprite; talk?: Sprite };
+  /**
+   * Gesture poses (a hand raised, both hands open), each with its mouth-open
+   * twin. The speaker moves into and out of them while talking.
+   */
+  gestures?: Array<{ idle: Sprite; talk?: Sprite }>;
 };
 
 export type StoryRenderAssets = {
   characters: ReadonlyMap<string, CharacterSprites>;
   places: ReadonlyMap<string, Sprite>;
+  /** Home exercise programmes: each scene's exercise picture, by scene id. */
+  cards?: ReadonlyMap<string, Sprite>;
   headingFont: string;
   /** Line timings. Defaults to an estimate from the number of words. */
   timeLine?: TimeLine;
@@ -225,6 +234,11 @@ function drawBackdrop(
 /* Characters                                                          */
 /* ------------------------------------------------------------------ */
 
+/** Whether two pictures have nearly the same outline proportions (within 12%). */
+function sameShape(a: Sprite, b: Sprite): boolean {
+  return Math.abs((a.width / a.height) / (b.width / b.height) - 1) < 0.12;
+}
+
 const PLACEHOLDER_COLOURS = ["#F9A8D4", "#93C5FD", "#FCD34D", "#86EFAC", "#C4B5FD", "#FDBA74"];
 
 /** A friendly stand-in shown until a character's picture has been drawn. */
@@ -274,6 +288,139 @@ function drawSpeechMarks(ctx: CanvasRenderingContext2D, x: number, y: number, si
     }
   }
   ctx.restore();
+}
+
+/* ------------------------------------------------------------------ */
+/* Exercise cards                                                      */
+/* ------------------------------------------------------------------ */
+
+type TextLayout = { lines: string[]; size: number; height: number; font: string; maxWidth: number };
+
+/** Breaks text into one or two lines inside `maxWidth`, shrinking it if needed. */
+function layoutText(
+  ctx: CanvasRenderingContext2D,
+  text: string,
+  maxWidth: number,
+  size: number,
+  font: string,
+  weight = 700,
+): TextLayout {
+  const words = text.trim().split(/\s+/);
+  for (let current = size; current >= size * 0.55; current *= 0.92) {
+    const style = `${weight} ${current}px ${font}`;
+    ctx.font = style;
+    const lines: string[] = [];
+    let line = "";
+    for (const word of words) {
+      const next = line ? `${line} ${word}` : word;
+      if (ctx.measureText(next).width <= maxWidth || !line) line = next;
+      else {
+        lines.push(line);
+        line = word;
+      }
+    }
+    if (line) lines.push(line);
+    if (lines.length <= 2 && lines.every((item) => ctx.measureText(item).width <= maxWidth)) {
+      return { lines, size: current, height: lines.length * current * 1.15, font: style, maxWidth };
+    }
+  }
+  const small = size * 0.55;
+  return { lines: [text.trim().slice(0, 40)], size: small, height: small * 1.15, font: `${weight} ${small}px ${font}`, maxWidth };
+}
+
+function drawText(ctx: CanvasRenderingContext2D, layout: TextLayout, x: number, y: number, colour: string) {
+  ctx.font = layout.font;
+  ctx.fillStyle = colour;
+  ctx.textBaseline = "top";
+  layout.lines.forEach((item, i) => ctx.fillText(item, x, y + i * layout.size * 1.15, layout.maxWidth));
+}
+
+/** The card above the characters in a home exercise programme. */
+function drawExerciseCard(
+  ctx: CanvasRenderingContext2D,
+  card: ExerciseCard,
+  picture: Sprite | undefined,
+  { width: W, height: H }: Dimensions,
+  font: string,
+) {
+  const h = H * (W > H ? 0.4 : 0.37);
+  // Wide and square videos put the picture on the left with the words beside it; tall ones put it on top.
+  const sideBySide = (W * 0.9) / h > 1.8;
+  // A side-by-side card is only as wide as it needs to be, so it does not cover the whole scene.
+  const w = sideBySide ? Math.min(W * 0.9, h * 2.6) : W * 0.9;
+  const x = (W - w) / 2;
+  const y = H * 0.04;
+  const pad = Math.min(w, h) * 0.05;
+  const gap = pad * 0.3;
+
+  // Lay the words out first: the picture gets whatever room they leave.
+  const picSide = h - pad * 2;
+  const textW = sideBySide ? w - picSide - pad * 3 : w - pad * 2;
+  const titleSize = Math.min(w, h) * (sideBySide ? 0.13 : 0.085);
+  const title = layoutText(ctx, card.title, textW, titleSize, font);
+  const dose = card.dose.trim();
+  const badgeH = dose ? titleSize * 0.95 : 0;
+  const cautionText = card.caution?.trim();
+  const caution = cautionText ? layoutText(ctx, `⚠ ${cautionText}`, textW, titleSize * 0.5, font, 600) : undefined;
+  const textH = title.height + (dose ? gap + badgeH : 0) + (caution ? gap + caution.height : 0);
+
+  ctx.shadowColor = "rgba(31, 20, 16, 0.25)";
+  ctx.shadowBlur = Math.min(w, h) * 0.04;
+  // Fully opaque, so shapes in the background never show through the card.
+  ctx.fillStyle = "#FFFFFF";
+  ctx.beginPath();
+  ctx.roundRect(x, y, w, h, Math.min(w, h) * 0.06);
+  ctx.fill();
+  ctx.shadowColor = "transparent";
+
+  const picBox = sideBySide
+    ? { x: x + pad, y: y + pad, w: picSide, h: picSide }
+    : { x: x + pad, y: y + pad, w: w - pad * 2, h: Math.max(h * 0.35, h - pad * 2.6 - textH) };
+  if (picture) {
+    const scale = Math.min(picBox.w / picture.width, picBox.h / picture.height);
+    const pw = picture.width * scale;
+    const ph = picture.height * scale;
+    ctx.save();
+    ctx.beginPath();
+    ctx.roundRect(picBox.x + (picBox.w - pw) / 2, picBox.y + (picBox.h - ph) / 2, pw, ph, Math.min(pw, ph) * 0.05);
+    ctx.clip();
+    ctx.drawImage(picture.source, picBox.x + (picBox.w - pw) / 2, picBox.y + (picBox.h - ph) / 2, pw, ph);
+    ctx.restore();
+  } else {
+    ctx.fillStyle = "#F1E9DD";
+    ctx.beginPath();
+    ctx.roundRect(picBox.x, picBox.y, picBox.w, picBox.h, Math.min(picBox.w, picBox.h) * 0.05);
+    ctx.fill();
+  }
+
+  // Beside the picture the words are left-aligned and centred top to bottom; under it they are centred.
+  const align: CanvasTextAlign = sideBySide ? "left" : "center";
+  const left = sideBySide ? picBox.x + picBox.w + pad : x + pad;
+  const textX = sideBySide ? left : x + w / 2;
+  let textY = sideBySide ? y + Math.max(pad, (h - textH) / 2) : picBox.y + picBox.h + pad * 0.6;
+  ctx.textAlign = align;
+  drawText(ctx, title, textX, textY, "#2B2118");
+  textY += title.height;
+  if (dose) {
+    textY += gap;
+    ctx.font = `700 ${titleSize * 0.62}px ${font}`;
+    const bw = Math.min(textW, ctx.measureText(dose).width + titleSize * 0.8);
+    const bx = sideBySide ? left : textX - bw / 2;
+    ctx.fillStyle = "#0F766E";
+    ctx.beginPath();
+    ctx.roundRect(bx, textY, bw, badgeH, badgeH / 2);
+    ctx.fill();
+    ctx.fillStyle = "#FFFFFF";
+    ctx.textBaseline = "middle";
+    ctx.textAlign = "center";
+    ctx.fillText(dose, bx + bw / 2, textY + badgeH / 2, bw - titleSize * 0.8);
+    textY += badgeH;
+  }
+  if (caution) {
+    ctx.textAlign = align;
+    drawText(ctx, caution, textX, textY + gap, "#9A3412");
+  }
+  ctx.textAlign = "left";
 }
 
 /* ------------------------------------------------------------------ */
@@ -352,8 +499,13 @@ export function drawStoryFrame(
   ctx.globalAlpha = 1;
 
   // A slow push-in keeps a still background from feeling frozen.
-  const zoom = settled ? 1.05 : 1.03 + 0.012 * Math.min(moment.sceneLocal, 6);
+  // Calm (sensory-friendly) stories move less: no flash, a slower push-in, gentler bounce and sway.
+  const calm = story.calm === true;
+  const motion = calm ? 0.4 : 1;
+  const zoom = settled ? 1.05 : 1.03 + 0.012 * motion * Math.min(moment.sceneLocal, 6);
   drawBackdrop(ctx, assets.places.get(scene.locationId), dims, layout.floor, zoom);
+  // With an exercise card at the top, the characters stand a little smaller below it.
+  const cardScale = scene.card ? 0.72 : 1;
 
   /* Characters: each keeps its place on screen (slot i) whatever the painting order. */
   const cast = scene.onStage
@@ -383,7 +535,7 @@ export function drawStoryFrame(
     const floor = layout.floor - (atBack ? layout.rowLift : 0);
     const maxWidth = W * place.maxWidth;
     // People further away look a touch smaller.
-    let h = H * layout.heights[character.size] * (atBack ? 0.95 : 1);
+    let h = H * layout.heights[character.size] * (atBack ? 0.95 : 1) * cardScale;
     let w = h * aspect;
     if (w > maxWidth) {
       h *= maxWidth / w;
@@ -392,9 +544,18 @@ export function drawStoryFrame(
 
     const x = W * place.x;
     const facing = place.x > 0.5 ? -1 : 1; // pictures are drawn facing right
-    const bounce = isSpeaker && speaking ? -Math.abs(Math.sin(moment.lineLocal * Math.PI * 2.4)) * h * 0.018 : 0;
+    const bounce = isSpeaker && speaking ? -Math.abs(Math.sin(moment.lineLocal * Math.PI * 2.4)) * h * 0.018 * motion : 0;
     const breathe = settled ? 1 : 1 + 0.006 * Math.sin(time * 1.7 + i * 1.3);
-    const y = H * floor + bounce + (1 - arrive) * h * 0.08;
+
+    // Listeners nod along twice, a little after the middle of each line, each at their own moment.
+    let nod = 0;
+    if (!isSpeaker && speakerId && speaking && timing && !settled) {
+      const spoken = timing.speechEnd - timing.speechStart;
+      const at = timing.speechStart + spoken * 0.5 + i * 0.17;
+      const phase = (moment.lineLocal - at) / 0.55;
+      if (spoken > 1.2 && phase >= 0 && phase <= 1) nod = Math.abs(Math.sin(phase * Math.PI * 2)) * (calm ? 0.5 : 1);
+    }
+    const y = H * floor + bounce + (1 - arrive) * h * 0.08 + nod * h * 0.008;
 
     ctx.save();
     ctx.globalAlpha = arrive;
@@ -405,25 +566,49 @@ export function drawStoryFrame(
     ctx.fill();
 
     ctx.translate(x, y);
-    // A speaker sways a little towards the person they are talking to.
-    if (isSpeaker && speaking) ctx.rotate(facing * 0.018 * Math.sin(moment.lineLocal * Math.PI * 0.9));
+    // A speaker sways a little towards the person they are talking to; a listener leans in to nod.
+    if (isSpeaker && speaking) ctx.rotate(facing * 0.018 * motion * Math.sin(moment.lineLocal * Math.PI * 0.9));
+    if (nod) ctx.rotate(facing * 0.015 * nod);
     ctx.scale(facing, breathe);
     if (sprites) {
-      const gesturing =
-        isSpeaker && speaking && sprites.gesture && line && timing
-          ? isGesturing(line, moment.lineLocal, timing)
-          : false;
-      const base = gesturing && sprites.gesture ? sprites.gesture.idle : sprites.idle;
-      const talk = gesturing && sprites.gesture ? sprites.gesture.talk : sprites.talk;
-      // A pose and its mouth-open twin are drawn into the same box, which lines
-      // them up even if the twin came back slightly shifted or resized.
-      const pose = isSpeaker && mouthOpen && talk ? talk : base;
-      // Different poses have different outlines, so they are lined up by the feet
-      // and drawn at the same scale as the standing pose.
+      const poses = sprites.gestures ?? [];
+      const hands =
+        isSpeaker && speaking && poses.length > 0 && line && timing
+          ? gestureAt(line, moment.lineLocal, timing, poses.length)
+          : { pose: NO_GESTURE, from: NO_GESTURE, blend: 1 };
       const scale = h / sprites.idle.height;
       const feet = -w / 2 + (sprites.idle.feetX ?? sprites.idle.width / 2) * scale;
-      const left = feet - (base.feetX ?? base.width / 2) * scale;
-      ctx.drawImage(pose.source, left, -base.height * scale, base.width * scale, base.height * scale);
+      /** Paints one pose. Every pose is lined up by the feet and drawn at the standing pose's scale. */
+      const paint = (index: number, alpha: number) => {
+        const set = index === NO_GESTURE ? sprites : (poses[index] ?? sprites);
+        const base = set.idle;
+        const pose = isSpeaker && mouthOpen && set.talk ? set.talk : base;
+        ctx.globalAlpha = arrive * alpha;
+        if (pose === base || sameShape(pose, base)) {
+          // A pose and its mouth-open twin share one box, which lines them up even if the twin drifted a little.
+          const left = feet - (base.feetX ?? base.width / 2) * scale;
+          ctx.drawImage(pose.source, left, -base.height * scale, base.width * scale, base.height * scale);
+        } else {
+          // A twin that came back a different shape keeps its own proportions instead of being stretched.
+          const twin = (base.height * scale) / pose.height;
+          const left = feet - (pose.feetX ?? pose.width / 2) * twin;
+          ctx.drawImage(pose.source, left, -pose.height * twin, pose.width * twin, pose.height * twin);
+        }
+      };
+      const blend = hands.blend;
+      if (blend >= 1 || hands.pose === hands.from) {
+        paint(hands.pose, 1);
+      } else {
+        // Moving between poses: the body stays solid while the arms fade from one pose to the other.
+        ctx.translate(0, -h * 0.006 * Math.sin(Math.PI * blend));
+        if (blend < 0.5) {
+          paint(hands.from, 1);
+          paint(hands.pose, blend * 2);
+        } else {
+          paint(hands.pose, 1);
+          paint(hands.from, (1 - blend) * 2);
+        }
+      }
     } else {
       ctx.scale(facing, 1); // keep the placeholder's letter readable
       drawPlaceholderCharacter(
@@ -441,6 +626,15 @@ export function drawStoryFrame(
       drawSpeechMarks(ctx, x + facing * w * 0.3, y - h * 0.94, h * 0.07, facing);
     }
   });
+
+  /* Exercise card: the picture of the exercise, its name and how much. */
+  if (scene.card) {
+    const appear = settled ? 1 : easeOutCubic(clamp01(moment.sceneLocal / (SCENE_LEAD_SEC * 0.9)));
+    ctx.save();
+    ctx.globalAlpha = appear;
+    drawExerciseCard(ctx, scene.card, assets.cards?.get(scene.id), dims, assets.headingFont);
+    ctx.restore();
+  }
 
   /* Caption: the chunk being "said" right now. */
   if (line && timing) {
@@ -462,13 +656,14 @@ export function drawStoryFrame(
         }
         start += length;
       }
-      const pop = settled ? 1 : 0.86 + 0.14 * easeOutCubic(clamp01(sinceStart / 0.09));
+      // Calm stories show each word without the little "pop".
+      const pop = settled || calm ? 1 : 0.86 + 0.14 * easeOutCubic(clamp01(sinceStart / 0.09));
       drawCaption(ctx, current.text, line.speaker === NARRATOR, dims, layout, assets.headingFont, pop);
     }
   }
 
   /* A quick soft flash marks each change of scene. */
-  if (!settled && moment.sceneIndex > 0 && moment.sceneLocal < 0.22) {
+  if (!settled && !calm && moment.sceneIndex > 0 && moment.sceneLocal < 0.22) {
     ctx.globalAlpha = 0.85 * (1 - moment.sceneLocal / 0.22);
     ctx.fillStyle = "#FFFFFF";
     ctx.fillRect(0, 0, W, H);

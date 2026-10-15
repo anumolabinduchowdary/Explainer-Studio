@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import sampleStory from "@/examples/cerebral-palsy.story.json";
 import { ERROR_COPY } from "@/lib/errors";
 import {
+  catalogueHasLanguage,
   loadCatalogue,
   resetCatalogueCache,
   speakWithSpeechgen,
@@ -40,6 +41,8 @@ const CATALOGUE: Catalogue = {
     { voice: "Ananya", sex: "female", type: "pro" },
     { voice: "Prabhat", sex: "male", type: "pro" },
     { voice: "Rudra", sex: "male", type: "pro" },
+    { voice: "Kajal plus", sex: "female", type: "pro" },
+    { voice: "Shivay", sex: "male", type: "pro" },
   ],
   "Hindi (Indian)": [
     { voice: "Swara", sex: "female", type: "pro" },
@@ -100,7 +103,10 @@ describe("voices offered for a language", () => {
   it("offers the Indian accent of English first, then real children's and older voices", () => {
     const voices = voicesForLanguage(CATALOGUE, "English", "Indian");
     // Better-quality voices first; the Indian accent comes before any other.
-    expect(ids(voices).slice(0, 5)).toEqual(["Neerja", "Ananya", "Prabhat", "Rudra", "Aditi"]);
+    expect(ids(voices).slice(0, 7)).toEqual(["Neerja", "Ananya", "Prabhat", "Rudra", "Kajal plus", "Shivay", "Aditi"]);
+    // Voices from other accents are marked, so they are offered but never given out automatically.
+    expect(voices.filter((voice) => voice.otherAccent).every((voice) => voice.age !== "adult")).toBe(true);
+    expect(voices.find((voice) => voice.id === "Neerja")?.otherAccent).toBeUndefined();
     expect(voices.filter((voice) => voice.age === "child").map((voice) => voice.label)).toEqual([
       "Abigail (English US)",
       "Aldric (English US)",
@@ -111,7 +117,7 @@ describe("voices offered for a language", () => {
     expect(voices.find((voice) => voice.id === "Blake")).toMatchObject({ gender: "male", age: "older" });
     // Adults of other accents are left out, to keep the menu short.
     expect(ids(voices)).not.toContain("Davis");
-    expect(VoicesResponseSchema.safeParse({ provider: "speechgen", voices }).success).toBe(true);
+    expect(VoicesResponseSchema.safeParse({ provider: "speechgen", voices, supported: true }).success).toBe(true);
   });
 
   it("matches languages however people write them", () => {
@@ -122,9 +128,13 @@ describe("voices offered for a language", () => {
     expect(ids(voicesForLanguage(CATALOGUE, "Spanish", "Indian"))).toEqual(["Elvira"]);
   });
 
-  it("falls back to English when the language is unknown or empty", () => {
+  it("falls back to English when the language is unknown or empty, and says so", () => {
     expect(ids(voicesForLanguage(CATALOGUE, "Klingon", "Indian"))[0]).toBe("Neerja");
     expect(ids(voicesForLanguage(CATALOGUE, "", "Indian"))[0]).toBe("Neerja");
+    expect(catalogueHasLanguage(CATALOGUE, "Klingon")).toBe(false);
+    expect(catalogueHasLanguage(CATALOGUE, "Odia")).toBe(false);
+    expect(catalogueHasLanguage(CATALOGUE, "telugu")).toBe(true);
+    expect(catalogueHasLanguage(CATALOGUE, "Indian English")).toBe(true);
   });
 
   it("follows the accent setting", () => {
@@ -150,7 +160,7 @@ describe("casting", () => {
     })),
   });
 
-  it("gives children real children's voices and adults the story's accent", () => {
+  it("keeps the story's accent for everyone: children get its voices, made younger", () => {
     // A physiotherapist (woman), two boys and two girls, as the story writer casts them.
     const cast = castVoices(
       story([
@@ -162,30 +172,33 @@ describe("casting", () => {
       ]),
       english,
     );
-    expect(cast.characters.map((c) => c.voice)).toEqual(["Neerja", "Aldric", "Justin plus", "Abigail", "Maisie"]);
-    // Everyone sounds different, and the narrator does not reuse a character's voice.
+    // All Indian English voices; the children's are pitched up when played (see ageRate).
+    expect(cast.characters.map((c) => c.voice)).toEqual(["Neerja", "Prabhat", "Rudra", "Ananya", "Kajal plus"]);
     const all = [cast.narratorVoice, ...cast.characters.map((c) => c.voice)];
     expect(new Set(all).size).toBe(all.length);
-    expect(english.find((voice) => voice.id === cast.narratorVoice)?.age).toBe("adult");
+    expect(english.find((voice) => voice.id === cast.narratorVoice)).toMatchObject({ age: "adult" });
+    expect(all.every((id) => !english.find((voice) => voice.id === id)?.otherAccent)).toBe(true);
+    const boy = english.find((voice) => voice.id === "Prabhat");
+    expect(ageRate("child", boy)).toBe(VOICE_AGE_SETTINGS.child.rate);
   });
 
-  it("falls back to an adult voice of the right gender when the children's voices run out", () => {
-    const cast = castVoices(
-      story([
-        ["verse", "child"],
-        ["echo", "child"],
-        ["ash", "child"],
-      ]),
-      english,
-    );
-    // "Justin" and "Justin plus" are one voice, so the third boy gets a man's voice, pitched up later.
-    expect(cast.characters.map((c) => c.voice)).toEqual(["Aldric", "Justin plus", "Prabhat"]);
-  });
-
-  it("uses adult voices where a language has no children's voices, and an older voice for a grandfather", () => {
+  it("gives a grandfather the story's accent too, made older", () => {
+    const cast = castVoices(story([["onyx", "older"]]), english);
+    expect(cast.characters[0].voice).toBe("Prabhat");
     const hindi = castVoices(story([["coral", "child"], ["onyx", "adult"]]), voicesForLanguage(CATALOGUE, "Hindi", "Indian"));
     expect(hindi.characters.map((c) => c.voice)).toEqual(["Swara", "Madhur"]);
-    expect(castVoices(story([["onyx", "older"]]), english).characters[0].voice).toBe("Blake");
+  });
+
+  it("keeps a real child's voice that was chosen by hand", () => {
+    const picked = { ...castVoices(story([["verse", "child"]]), english) };
+    picked.characters = [{ ...picked.characters[0], voice: "Aldric" }];
+    expect(castVoices(picked, english)).toBe(picked);
+    expect(ageRate("child", english.find((voice) => voice.id === "Aldric"))).toBe(1);
+  });
+
+  it("uses other accents only when the story's own has no voices at all", () => {
+    const onlyOthers = english.filter((voice) => voice.otherAccent);
+    expect(castVoices(story([["verse", "child"]]), onlyOthers).characters[0].voice).toBe("Aldric");
   });
 
   it("leaves a story alone when its voices already belong to the list", () => {

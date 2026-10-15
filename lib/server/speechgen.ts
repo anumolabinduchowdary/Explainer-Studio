@@ -116,6 +116,12 @@ const ALIASES: Record<string, string> = {
 };
 const words = (text: string) => (text.toLowerCase().match(/\p{L}+/gu) ?? []).map((word) => ALIASES[word] ?? word);
 
+/** Whether any of SpeechGen's languages matches, e.g. "Telugu" or "Indian English". */
+export function catalogueHasLanguage(catalogue: Catalogue, language: string): boolean {
+  const wanted = new Set(words(language));
+  return Object.keys(catalogue).some((name) => words(name).some((word) => wanted.has(word)));
+}
+
 const TYPE_ORDER: Record<string, number> = { pro: 0, hd: 1, base: 2 };
 const byQuality = (a: RawVoice, b: RawVoice) => (TYPE_ORDER[a.type ?? ""] ?? 3) - (TYPE_ORDER[b.type ?? ""] ?? 3);
 
@@ -178,7 +184,7 @@ export function voicesForLanguage(
   const extras = names
     .filter((name) => name !== main.name && words(name).includes(family))
     .flatMap((name) =>
-      [...catalogue[name]].sort(byQuality).map((voice) => toOption(voice, `${voice.voice} (${name})`)),
+      [...catalogue[name]].sort(byQuality).map((voice) => ({ ...toOption(voice, `${voice.voice} (${name})`), otherAccent: true })),
     )
     .filter((voice) => voice.age !== "adult")
     .slice(0, MAX_EXTRA_VOICES);
@@ -306,7 +312,7 @@ export async function speakWithSpeechgen(
   // An adult voice playing a child is pitched up in the browser, which also speeds it
   // up, so it is asked to speak a little slower. A real child's voice is left alone.
   const shifted = ageRate(age, toOption(voice, voice.voice)) !== 1;
-  const style = matchingStyle(voice, request.style);
+  const style = matchingStyle(voice, [request.delivery, request.style].filter(Boolean).join(" "));
   const account = { token: credentials.token, email: credentials.email };
 
   let reply = await call(

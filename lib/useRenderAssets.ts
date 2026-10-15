@@ -8,8 +8,10 @@ import type { VisualId } from "./visuals";
 const FALLBACK_FONTS = 'system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans", sans-serif';
 
 function fontFamily(variable: string): string {
-  const value = getComputedStyle(document.documentElement).getPropertyValue(variable).trim();
-  return value ? `${value}, ${FALLBACK_FONTS}` : FALLBACK_FONTS;
+  const style = getComputedStyle(document.documentElement);
+  // After the app's own font come the Baloo families for Indian scripts (see app/layout.tsx).
+  const families = [style.getPropertyValue(variable).trim(), style.getPropertyValue("--font-indic").trim()];
+  return [...families.filter(Boolean), FALLBACK_FONTS].join(", ");
 }
 
 export type CanvasFonts = {

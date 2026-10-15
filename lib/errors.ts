@@ -18,6 +18,14 @@ export const ERROR_CODES = [
   "voice_credit",
   "voice_unavailable",
   "voice_busy",
+  "signed_out",
+  "not_allowed",
+  "code_wrong",
+  "code_expired",
+  "email_failed",
+  "youtube_reconnect",
+  "youtube_quota",
+  "youtube_failed",
   "server_error",
 ] as const;
 
@@ -110,6 +118,38 @@ export const ERROR_COPY: Record<ErrorCode, { title: string; message: string }> =
   voice_busy: {
     title: "The voice service is busy",
     message: "The voice service couldn't take the request. Please wait a few seconds and try again.",
+  },
+  signed_out: {
+    title: "Please sign in",
+    message: "You are not signed in, or your sign-in has ended. Sign in again to continue.",
+  },
+  not_allowed: {
+    title: "This email isn't approved yet",
+    message: "Ask the person who runs this app to add your email address, then try again.",
+  },
+  code_wrong: {
+    title: "That code isn't right",
+    message: "Check the 6 digits in the email and try again.",
+  },
+  code_expired: {
+    title: "That code has run out",
+    message: "Codes work for 10 minutes. Ask for a new one and use it straight away.",
+  },
+  email_failed: {
+    title: "We couldn't send the email",
+    message: "The sign-in email could not be sent. Please try again in a minute.",
+  },
+  youtube_reconnect: {
+    title: "Please connect YouTube again",
+    message: "The app's permission to post to your channel has ended or was removed. Connect YouTube again, then press Upload.",
+  },
+  youtube_quota: {
+    title: "YouTube's daily limit is reached",
+    message: "YouTube allows a limited number of uploads each day through apps. Please try again tomorrow, or upload this file yourself in YouTube Studio.",
+  },
+  youtube_failed: {
+    title: "YouTube didn't accept the upload",
+    message: "Something went wrong while sending the video to YouTube. Please try again in a minute.",
   },
   server_error: {
     title: "Something went wrong",

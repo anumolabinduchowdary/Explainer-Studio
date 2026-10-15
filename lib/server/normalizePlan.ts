@@ -1,14 +1,64 @@
 import {
+  MAX_EXERCISES,
   PLAN_LIMITS,
   StoryPlanSchema,
+  type StoryKind,
   sizeForAge,
   type PlanBuildWire,
   type PlanResponse,
   type StoryFromPlanWire,
   type StoryPlan,
 } from "@/lib/plan";
-import { STORY_LIMITS, VOICE_IDS, type Story, type StoryWire } from "@/lib/story";
+import { DEFAULT_ART_STYLE, STORY_LIMITS, VOICE_IDS, type Story, type StoryWire } from "@/lib/story";
+import { disclaimerFor } from "@/lib/disclaimer";
 import { normalizeStory } from "./normalizeStory";
+
+type WireScene = StoryFromPlanWire["scenes"][number];
+
+/**
+ * In a home exercise programme every exercise gets its own scene with its
+ * card, in the therapist's order. Exercises the writer left out are added as
+ * a simple scene where the therapist reads the steps, so none is ever lost.
+ */
+function scenesWithCards(plan: StoryPlan, scenes: WireScene[]): StoryWire["scenes"] {
+  const exercises = plan.kind === "exercises" ? plan.exercises : [];
+  const card = (index: number) => {
+    const exercise = exercises[index];
+    return exercise
+      ? {
+          card: {
+            title: exercise.name,
+            dose: exercise.dose,
+            look: exercise.look,
+            ...(exercise.caution ? { caution: exercise.caution } : {}),
+          },
+        }
+      : {};
+  };
+  const shown = new Set<number>();
+  const result: StoryWire["scenes"] = scenes.map(({ exercise, ...scene }, i) => {
+    const index = Number.isInteger(exercise) && !shown.has(exercise) ? exercise : -1;
+    if (index >= 0 && index < exercises.length) shown.add(index);
+    return { id: `s${i + 1}`, ...scene, ...card(index) };
+  });
+  const therapist = plan.characters.find((character) => character.age !== "child") ?? plan.characters[0];
+  exercises.forEach((exercise, index) => {
+    if (shown.has(index)) return;
+    // Put it before the closing scene, in order.
+    const at = Math.max(0, result.length - 1);
+    result.splice(at, 0, {
+      id: `x${index + 1}`,
+      locationId: plan.places[0].id,
+      onStage: [therapist.id],
+      lines: [
+        { speaker: therapist.id, text: `${exercise.name}. ${exercise.steps}`.slice(0, 160), how: "clear and encouraging" },
+        ...(exercise.dose ? [{ speaker: therapist.id, text: exercise.dose, how: "clear and encouraging" }] : []),
+      ],
+      ...card(index),
+    });
+  });
+  return result;
+}
 
 const clip = (text: string, max: number) => text.trim().slice(0, max);
 
@@ -18,8 +68,9 @@ const clip = (text: string, max: number) => text.trim().slice(0, max);
  */
 export function normalizePlanBuild(
   wire: PlanBuildWire,
-  options: { allowQuestions: boolean },
+  options: { allowQuestions: boolean; kind?: StoryKind },
 ): PlanResponse {
+  const kind = options.kind ?? "story";
   const questions = wire.questions
     .map((q) => q.trim().slice(0, PLAN_LIMITS.question))
     .filter(Boolean)
@@ -28,7 +79,27 @@ export function normalizePlanBuild(
     return { status: "needs_clarification", questions };
   }
 
+  const exercises =
+    kind === "exercises"
+      ? wire.exercises
+          .filter((exercise) => exercise.name.trim() && exercise.steps.trim())
+          .slice(0, MAX_EXERCISES)
+          .map((exercise, i) => ({
+            id: `e${i + 1}`,
+            name: clip(exercise.name, 60),
+            steps: clip(exercise.steps, 300),
+            dose: clip(exercise.dose, 80),
+            look: clip(exercise.look, PLAN_LIMITS.look) || clip(exercise.steps, PLAN_LIMITS.look),
+            caution: clip(exercise.caution, 160),
+          }))
+      : [];
+  if (kind === "exercises" && exercises.length === 0) throw new Error("The programme has no exercises.");
+
   const plan = StoryPlanSchema.parse({
+    kind,
+    // Social Stories are always calm; the person can switch it on for any story on the plan.
+    calm: kind === "social",
+    exercises,
     message: clip(wire.message, PLAN_LIMITS.message),
     // Characters and places keep the order the model listed them in; nothing is merged.
     characters: wire.characters
@@ -54,6 +125,7 @@ export function normalizePlanBuild(
     language: clip(wire.language, PLAN_LIMITS.language),
     tone: clip(wire.tone, PLAN_LIMITS.tone),
     notes: clip(wire.notes, PLAN_LIMITS.notes),
+    style: clip(wire.style, STORY_LIMITS.artStyle),
   });
   return { status: "ready", plan };
 }
@@ -73,9 +145,11 @@ export function buildStoryFromPlan(plan: StoryPlan, wire: StoryFromPlanWire): St
   const draft: StoryWire = {
     title: wire.title,
     aspectRatio: plan.aspectRatio,
-    artStyle: wire.artStyle,
+    // Every picture follows the plan's drawing style, which comes from the person's own description.
+    artStyle: plan.style.trim() || DEFAULT_ART_STYLE,
     narratorVoice: wire.narratorVoice,
     isHealthTopic: wire.isHealthTopic,
+    disclaimer: disclaimerFor(plan.language, wire.disclaimer),
     characters: plan.characters.map((character, i) => {
       const chosen = voices.get(character.id);
       return {
@@ -90,7 +164,8 @@ export function buildStoryFromPlan(plan: StoryPlan, wire: StoryFromPlanWire): St
       };
     }),
     locations: plan.places.map((place) => ({ id: place.id, name: place.name, look: place.look })),
-    scenes: wire.scenes.map((scene, i) => ({ id: `s${i + 1}`, ...scene })),
+    calm: plan.calm,
+    scenes: scenesWithCards(plan, wire.scenes),
   };
 
   const story = normalizeStory(draft);

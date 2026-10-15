@@ -3,6 +3,11 @@ import { toFile } from "openai";
 import { AppError } from "./appError";
 import { missingSetting, type OpenAIClient } from "./openai";
 
+/** Whether speech-to-text is set up (it is optional). */
+export function canTranscribe(): boolean {
+  return Boolean(process.env.OPENAI_TRANSCRIBE_MODEL?.trim());
+}
+
 /** The speech-to-text model name comes from the environment, like the others. */
 function transcribeModel(): string {
   const model = process.env.OPENAI_TRANSCRIBE_MODEL?.trim();
@@ -34,6 +39,8 @@ export async function transcribeAudio(
   client: OpenAIClient,
   dataUrl: string,
   signal?: AbortSignal,
+  /** A short language code such as "hi", when known; otherwise it is detected. */
+  language?: string,
 ): Promise<string> {
   const model = transcribeModel();
   const match = /^data:(audio\/[a-z0-9.-]+)[^,]*;base64,(.+)$/i.exec(dataUrl);
@@ -44,6 +51,6 @@ export async function transcribeAudio(
   if (!extension) throw new AppError("invalid_input", 400, { message: "That recording could not be read." });
 
   const file = await toFile(Buffer.from(match[2], "base64"), `speech.${extension}`, { type });
-  const result = await client.audio.transcriptions.create({ model, file }, { signal });
+  const result = await client.audio.transcriptions.create({ model, file, ...(language ? { language } : {}) }, { signal });
   return result.text.trim();
 }

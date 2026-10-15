@@ -1,5 +1,6 @@
 import { createKeylessPostHandler } from "@/lib/server/handler";
-import { loadCatalogue, speechgenCredentials, voicesForLanguage } from "@/lib/server/speechgen";
+import { openAiSpeaksWell } from "@/lib/languages";
+import { catalogueHasLanguage, loadCatalogue, speechgenCredentials, voicesForLanguage } from "@/lib/server/speechgen";
 import { OPENAI_VOICE_LIST, VoicesRequestSchema, type VoiceList } from "@/lib/voices";
 
 export const maxDuration = 30;
@@ -10,8 +11,12 @@ export const POST = createKeylessPostHandler({
   schema: VoicesRequestSchema,
   deadlineMs: 25_000,
   async run({ body, signal }): Promise<VoiceList> {
-    if (!speechgenCredentials()) return OPENAI_VOICE_LIST;
-    const voices = voicesForLanguage(await loadCatalogue(signal), body.language);
-    return { provider: "speechgen", voices };
+    if (!speechgenCredentials()) return { ...OPENAI_VOICE_LIST, supported: openAiSpeaksWell(body.language) };
+    const catalogue = await loadCatalogue(signal);
+    return {
+      provider: "speechgen",
+      voices: voicesForLanguage(catalogue, body.language),
+      supported: !body.language.trim() || catalogueHasLanguage(catalogue, body.language),
+    };
   },
 });

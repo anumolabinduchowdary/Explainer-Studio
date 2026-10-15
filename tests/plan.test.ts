@@ -17,8 +17,15 @@ import {
 } from "@/lib/plan";
 import { dimensionsFor } from "@/lib/renderer";
 import { buildStoryFromPlan, normalizePlanBuild } from "@/lib/server/normalizePlan";
-import { PLAN_INSTRUCTIONS, STORY_INSTRUCTIONS, storyInput } from "@/lib/server/systemPrompts";
-import { NARRATOR, STORY_LIMITS, StorySchema } from "@/lib/story";
+import {
+  PLAN_INSTRUCTIONS,
+  STORY_INSTRUCTIONS,
+  planInput,
+  planInstructions,
+  storyInput,
+  storyInstructions,
+} from "@/lib/server/systemPrompts";
+import { DEFAULT_ART_STYLE, NARRATOR, STORY_LIMITS, StorySchema } from "@/lib/story";
 import { arrangeStage } from "@/lib/storyRenderer";
 
 /** What the planner should return for "4 children in a physiotherapy centre with a physiotherapist". */
@@ -39,6 +46,8 @@ const physioWire = (changes: Partial<PlanBuildWire> = {}): PlanBuildWire => ({
   language: "English",
   tone: "Playful and encouraging",
   notes: "",
+  style: "",
+  exercises: [],
   ...changes,
 });
 
@@ -50,9 +59,9 @@ const physioPlan = (): StoryPlan => {
 
 const script = (changes: Partial<StoryFromPlanWire> = {}): StoryFromPlanWire => ({
   title: "Fun at Physiotherapy",
-  artStyle: "",
   narratorVoice: "alloy",
   isHealthTopic: false,
+  disclaimer: "",
   voices: [
     { characterId: "c1", voice: "sage", voiceStyle: "calm and encouraging" },
     { characterId: "c2", voice: "verse", voiceStyle: "eager" },
@@ -62,20 +71,20 @@ const script = (changes: Partial<StoryFromPlanWire> = {}): StoryFromPlanWire => 
   ],
   scenes: [
     {
-      locationId: "l1",
+      locationId: "l1", exercise: -1,
       onStage: ["c1", "c2", "c3", "c4", "c5"],
       lines: [
-        { speaker: "c1", text: "Good morning, team! Ready to move?" },
-        { speaker: "c2", text: "Ready!" },
-        { speaker: "c3", text: "Me too!" },
+        { speaker: "c1", text: "Good morning, team! Ready to move?", how: "" },
+        { speaker: "c2", text: "Ready!", how: "" },
+        { speaker: "c3", text: "Me too!", how: "" },
       ],
     },
     {
-      locationId: "l1",
+      locationId: "l1", exercise: -1,
       onStage: ["c1", "c4", "c5"],
       lines: [
-        { speaker: "c4", text: "Watch me stretch!" },
-        { speaker: "c5", text: "I can balance now." },
+        { speaker: "c4", text: "Watch me stretch!", how: "" },
+        { speaker: "c5", text: "I can balance now.", how: "" },
       ],
     },
   ],
@@ -170,6 +179,26 @@ describe("the plan", () => {
     expect(storyInput(physioPlan())).toContain(text);
   });
 
+  it("keeps the drawing style the description asked for, and draws every picture in it", () => {
+    const styled = normalizePlanBuild(physioWire({ style: "  soft watercolour cartoon with pastel colours " }), { allowQuestions: false });
+    if (styled.status !== "ready") throw new Error("expected a plan");
+    expect(styled.plan.style).toBe("soft watercolour cartoon with pastel colours");
+    expect(assemblePlan(styled.plan)).toContain("Drawing style: soft watercolour cartoon with pastel colours");
+    expect(buildStoryFromPlan(styled.plan, script()).artStyle).toBe("soft watercolour cartoon with pastel colours");
+
+    // Nothing asked for: the standard cartoon style.
+    const plain = physioPlan();
+    expect(plain.style).toBe("");
+    expect(buildStoryFromPlan(plain, script()).artStyle).toBe(DEFAULT_ART_STYLE);
+    expect(assemblePlan(plain)).toContain("Drawing style: the standard friendly 2D cartoon style");
+    expect(PLAN_INSTRUCTIONS).toContain("never a photograph or photorealistic");
+    expect(PLAN_INSTRUCTIONS).toContain("Never name an artist, studio");
+    // Plans saved before the style existed still open.
+    const { style, ...older } = plain;
+    void style;
+    expect(StoryPlanSchema.parse(older).style).toBe("");
+  });
+
   it("has small helpers for sizes, ids and the number of pictures", () => {
     expect([sizeForAge("child"), sizeForAge("teen"), sizeForAge("adult"), sizeForAge("older")]).toEqual([
       "small",
@@ -179,7 +208,8 @@ describe("the plan", () => {
     ]);
     expect(nextId("c", [{ id: "c1" }, { id: "c3" }])).toBe("c4");
     expect(nextId("c", [{ id: "c1" }, { id: "c2" }])).toBe("c3");
-    expect(picturesNeeded(physioPlan())).toBe(21);
+    // 6 drawings for each of the 5 characters, and 1 for the place.
+    expect(picturesNeeded(physioPlan())).toBe(31);
   });
 });
 
@@ -213,11 +243,11 @@ describe("story from a plan", () => {
         voices: [{ characterId: "c1", voice: "sage", voiceStyle: "calm" }],
         scenes: [
           {
-            locationId: "somewhere else",
+            locationId: "somewhere else", exercise: -1,
             onStage: ["c1", "c9", "A new nurse"],
             lines: [
-              { speaker: "c1", text: "Hello everyone." },
-              { speaker: "A new nurse", text: "I was never in the plan." },
+              { speaker: "c1", text: "Hello everyone.", how: "" },
+              { speaker: "A new nurse", text: "I was never in the plan.", how: "" },
             ],
           },
         ],
@@ -242,7 +272,7 @@ describe("story from a plan", () => {
       trimmed,
       script({
         voices: [{ characterId: "c5", voice: "shimmer", voiceStyle: "shy" }],
-        scenes: [{ locationId: "l1", onStage: ["c1", "c5"], lines: [{ speaker: "c5", text: "Hello!" }] }],
+        scenes: [{ locationId: "l1", exercise: -1, onStage: ["c1", "c5"], lines: [{ speaker: "c5", text: "Hello!", how: "" }] }],
       }),
     );
     expect(story.characters.map((c) => c.name)).toEqual(["Ms. Kavya", "Diya", "Kabir", "Sara"]);
@@ -251,9 +281,16 @@ describe("story from a plan", () => {
     expect(story.scenes[0].lines[0].speaker).toBe(sara?.id);
   });
 
-  it("ends a health story with the disclaimer", () => {
+  it("ends a health story with the disclaimer, in the plan's language and then English", () => {
     const story = buildStoryFromPlan(physioPlan(), script({ isHealthTopic: true }));
     expect(story.scenes.at(-1)?.lines.at(-1)).toEqual({ speaker: NARRATOR, text: HEALTH_DISCLAIMER });
+    const telugu = buildStoryFromPlan({ ...physioPlan(), language: "Telugu" }, script({ isHealthTopic: true }));
+    expect(telugu.scenes.at(-1)?.lines.at(-1)).toEqual({ speaker: NARRATOR, text: `అవగాహన కోసం, వైద్య సలహా కాదు. ${HEALTH_DISCLAIMER}` });
+    const spanish = buildStoryFromPlan(
+      { ...physioPlan(), language: "Spanish" },
+      script({ isHealthTopic: true, disclaimer: "Para concienciar, no es consejo médico." }),
+    );
+    expect(spanish.scenes.at(-1)?.lines.at(-1)?.text).toBe(`Para concienciar, no es consejo médico. ${HEALTH_DISCLAIMER}`);
   });
 
   it("is rejected when the script has no usable scenes", () => {
@@ -322,3 +359,95 @@ describe("where characters stand", () => {
     }
   });
 });
+
+/* ------------------------------------------------------------------ */
+
+describe("Social Stories and home exercise programmes", () => {
+  it("makes a Social Story calm, and keeps exercises out of it", () => {
+    const social = normalizePlanBuild(physioWire({ exercises: [{ name: "x", steps: "y z", dose: "", look: "a b", caution: "" }] }), {
+      allowQuestions: false,
+      kind: "social",
+    });
+    if (social.status !== "ready") throw new Error("expected a plan");
+    expect(social.plan).toMatchObject({ kind: "social", calm: true, exercises: [] });
+    expect(assemblePlan(social.plan)).toContain("KIND\nSocial Story (calm, sensory-friendly)");
+    expect(planInstructions("social")).toContain("This is a Social Story");
+    expect(storyInstructions("social")).toContain("Write it in the first person, as the child");
+    expect(storyInstructions("social")).toContain("at least twice as many lines that describe or reassure");
+    expect(planInstructions("story")).toBe(PLAN_INSTRUCTIONS);
+  });
+
+  it("passes the child's details and the therapist's exercises to the planner", () => {
+    const social = planInput({
+      description: "Going to the dentist for a check-up.",
+      kind: "social",
+      child: { name: "Aarav", age: "6", look: "Curly hair and glasses", helps: "his toy dinosaur" },
+    });
+    expect(social).toContain("This is a Social Story for this child:\n- Name: Aarav\n- Age: 6\n- Looks like: Curly hair and glasses\n- What helps: his toy dinosaur");
+    const exercises = planInput({
+      description: "Leg exercises after surgery.",
+      kind: "exercises",
+      therapy: { type: "Physiotherapy", who: "Aarav, 6", exercises: "Bridge: lift hips, 10 times." },
+    });
+    expect(exercises).toContain("Therapy: Physiotherapy");
+    expect(exercises).toContain('The therapist\'s exercises, as written:\n"""\nBridge: lift hips, 10 times.\n"""');
+    expect(planInput({ description: "A story about friends." })).not.toContain("Social Story");
+  });
+
+  const exerciseWire = () =>
+    physioWire({
+      characters: [
+        { name: "Ms. Kavya", role: "physiotherapist", age: "adult", look: "A woman in a teal tunic." },
+        { name: "Aarav", role: "boy", age: "child", look: "A boy in a red T-shirt." },
+      ],
+      exercises: [
+        { name: "Bridge", steps: "Lie on your back, knees bent, and lift your hips.", dose: "Hold 5 seconds, 10 times", look: "A boy on a mat lifting his hips", caution: "" },
+        { name: "Sit to stand", steps: "Stand up from a chair without using your hands.", dose: "8 times, 2 rounds", look: "A boy standing up from a chair", caution: "Keep a hand near him." },
+        { name: "  ", steps: "", dose: "", look: "", caution: "" },
+      ],
+    });
+
+  it("turns the therapist's exercises into a programme, in order, adding nothing", () => {
+    const result = normalizePlanBuild(exerciseWire(), { allowQuestions: false, kind: "exercises" });
+    if (result.status !== "ready") throw new Error("expected a plan");
+    expect(result.plan.exercises.map((exercise) => [exercise.id, exercise.name, exercise.dose])).toEqual([
+      ["e1", "Bridge", "Hold 5 seconds, 10 times"],
+      ["e2", "Sit to stand", "8 times, 2 rounds"],
+    ]);
+    expect(picturesNeeded(result.plan)).toBe(2 * 6 + 1 + 2);
+    expect(assemblePlan(result.plan)).toContain("EXERCISES (2, in this order)\n- Exercise 0: Bridge.");
+    expect(storyInstructions("exercises")).toContain("one scene for each exercise in the plan, in order");
+    // A programme with no exercises is refused, which makes the planner try again.
+    expect(() => normalizePlanBuild(physioWire(), { allowQuestions: false, kind: "exercises" })).toThrow();
+  });
+
+  it("gives each exercise its card, and adds any exercise the writer left out", () => {
+    const result = normalizePlanBuild(exerciseWire(), { allowQuestions: false, kind: "exercises" });
+    if (result.status !== "ready") throw new Error("expected a plan");
+    const story = buildStoryFromPlan(
+      result.plan,
+      script({
+        voices: [],
+        scenes: [
+          { locationId: "l1", exercise: -1, onStage: ["c1", "c2"], lines: [{ speaker: "c1", text: "Hello Aarav! Ready?", how: "" }] },
+          { locationId: "l1", exercise: 0, onStage: ["c1", "c2"], lines: [{ speaker: "c1", text: "Bridge. Lift your hips. Ten times.", how: "" }] },
+          { locationId: "l1", exercise: -1, onStage: ["c1", "c2"], lines: [{ speaker: "c1", text: "Well done today!", how: "" }] },
+        ],
+      }),
+    );
+    expect(story.scenes.map((scene) => scene.card?.title ?? "-")).toEqual(["-", "Bridge", "Sit to stand", "-"]);
+    const added = story.scenes[2];
+    expect(added.card).toEqual({ title: "Sit to stand", dose: "8 times, 2 rounds", look: "A boy standing up from a chair", caution: "Keep a hand near him." });
+    expect(added.lines[0].text).toBe("Sit to stand. Stand up from a chair without using your hands.");
+    expect(added.lines[0].speaker).toBe("c1");
+    expect(StorySchema.safeParse(story).success).toBe(true);
+  });
+
+  it("keeps the calm setting on the story", () => {
+    const social = normalizePlanBuild(physioWire(), { allowQuestions: false, kind: "social" });
+    if (social.status !== "ready") throw new Error("expected a plan");
+    expect(buildStoryFromPlan(social.plan, script()).calm).toBe(true);
+    expect(buildStoryFromPlan(physioPlan(), script()).calm).toBeUndefined();
+  });
+});
+

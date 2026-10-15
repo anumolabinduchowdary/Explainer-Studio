@@ -1,4 +1,5 @@
 import { HEALTH_DISCLAIMER } from "@/lib/config";
+import { disclaimerFor, disclaimerIn, withoutDisclaimer } from "@/lib/disclaimer";
 import {
   FiveStepPromptSchema,
   LIMITS,
@@ -54,21 +55,19 @@ export function normalizeScene(wire: SceneWire, fallbackId: string): Scene {
   return scene;
 }
 
-const DISCLAIMER_PATTERN = new RegExp(
-  HEALTH_DISCLAIMER.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"),
-  "gi",
-);
-
 export function hasDisclaimer(scene: Scene): boolean {
   return scene.body.toLowerCase().includes(HEALTH_DISCLAIMER.toLowerCase());
 }
 
-/** Makes the scene's body end with the health disclaimer, exactly once. */
-export function ensureDisclaimer(scene: Scene): Scene {
-  let rest = scene.body.replace(DISCLAIMER_PATTERN, "").replace(/\s+/g, " ").trim();
-  const room = LIMITS.body - HEALTH_DISCLAIMER.length - 1;
+/**
+ * Makes the scene's body end with the health disclaimer, exactly once. In a
+ * video in another language that is the translation followed by the English.
+ */
+export function ensureDisclaimer(scene: Scene, disclaimer: string = HEALTH_DISCLAIMER): Scene {
+  let rest = withoutDisclaimer(scene.body, [disclaimer]);
+  const room = LIMITS.body - disclaimer.length - 1;
   if (rest.length > room) rest = `${rest.slice(0, room - 1).trimEnd()}…`;
-  return { ...scene, body: rest ? `${rest} ${HEALTH_DISCLAIMER}` : HEALTH_DISCLAIMER };
+  return { ...scene, body: rest ? `${rest} ${disclaimer}` : disclaimer };
 }
 
 export function normalizeStoryboard(wire: StoryboardWire): Storyboard {
@@ -81,7 +80,7 @@ export function normalizeStoryboard(wire: StoryboardWire): Storyboard {
 
   if (wire.isHealthTopic && scenes.length > 0) {
     const last = scenes.length - 1;
-    scenes[last] = ensureDisclaimer(scenes[last]);
+    scenes[last] = ensureDisclaimer(scenes[last], disclaimerFor(wire.language, wire.disclaimer));
   }
 
   return StoryboardSchema.parse({
@@ -91,8 +90,8 @@ export function normalizeStoryboard(wire: StoryboardWire): Storyboard {
   });
 }
 
-/** A regenerated scene keeps its id, and its disclaimer if the old one had it. */
+/** A regenerated scene keeps its id, and its disclaimer (in the same languages) if the old one had it. */
 export function normalizeRegeneratedScene(wire: SceneWire, previous: Scene): Scene {
   const scene = { ...normalizeScene(wire, previous.id), id: previous.id };
-  return hasDisclaimer(previous) ? ensureDisclaimer(scene) : scene;
+  return hasDisclaimer(previous) ? ensureDisclaimer(scene, disclaimerIn(previous.body)) : scene;
 }

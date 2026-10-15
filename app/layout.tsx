@@ -1,15 +1,45 @@
 import type { Metadata, Viewport } from "next";
-import { Baloo_2, Nunito } from "next/font/google";
+import {
+  Baloo_2,
+  Baloo_Bhai_2,
+  Baloo_Bhaina_2,
+  Baloo_Chettan_2,
+  Baloo_Da_2,
+  Baloo_Paaji_2,
+  Baloo_Tamma_2,
+  Baloo_Tammudu_2,
+  Baloo_Thambi_2,
+  Nunito,
+} from "next/font/google";
+import type { CSSProperties } from "react";
 import { APP_NAME } from "@/lib/config";
 import "./globals.css";
 
 // Friendly rounded fonts. They are also used for the text inside the video.
 const heading = Baloo_2({
   variable: "--font-heading",
-  subsets: ["latin"],
+  // Baloo 2 also covers Devanagari, for Hindi and Marathi.
+  subsets: ["latin", "devanagari"],
   weight: ["600", "700"],
   display: "swap",
 });
+
+/*
+ * The same rounded Baloo design for the other Indian scripts, so captions in
+ * Telugu, Tamil and the rest look like the English ones, in the page and in
+ * the finished video. Each is only downloaded when text in its script is shown.
+ */
+const telugu = Baloo_Tammudu_2({ subsets: ["telugu"], display: "swap", preload: false, adjustFontFallback: false });
+const tamil = Baloo_Thambi_2({ subsets: ["tamil"], display: "swap", preload: false, adjustFontFallback: false });
+const kannada = Baloo_Tamma_2({ subsets: ["kannada"], display: "swap", preload: false, adjustFontFallback: false });
+const malayalam = Baloo_Chettan_2({ subsets: ["malayalam"], display: "swap", preload: false, adjustFontFallback: false });
+const bengali = Baloo_Da_2({ subsets: ["bengali"], display: "swap", preload: false, adjustFontFallback: false });
+const gujarati = Baloo_Bhai_2({ subsets: ["gujarati"], display: "swap", preload: false, adjustFontFallback: false });
+const gurmukhi = Baloo_Paaji_2({ subsets: ["gurmukhi"], display: "swap", preload: false, adjustFontFallback: false });
+const odia = Baloo_Bhaina_2({ subsets: ["oriya"], display: "swap", preload: false, adjustFontFallback: false });
+const indianScripts = [telugu, tamil, kannada, malayalam, bengali, gujarati, gurmukhi, odia];
+/** Baloo 2 first (Devanagari), then one family per script. Used after the main fonts. */
+const indianFontStack = [heading.style.fontFamily, ...indianScripts.map((font) => font.style.fontFamily)].join(", ");
 
 const body = Nunito({
   variable: "--font-body",
@@ -32,7 +62,11 @@ export const viewport: Viewport = {
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
-    <html lang="en" className={`${heading.variable} ${body.variable} h-full antialiased`}>
+    <html
+      lang="en"
+      className={`${heading.variable} ${body.variable} h-full antialiased`}
+      style={{ "--font-indic": indianFontStack } as CSSProperties}
+    >
       <body className="flex min-h-full flex-col">
         <a
           href="#main"

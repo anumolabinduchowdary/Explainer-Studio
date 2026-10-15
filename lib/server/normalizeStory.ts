@@ -1,4 +1,5 @@
 import { HEALTH_DISCLAIMER } from "@/lib/config";
+import { withoutDisclaimer } from "@/lib/disclaimer";
 import {
   DEFAULT_ART_STYLE,
   NARRATOR,
@@ -46,11 +47,15 @@ export function normalizeStory(wire: StoryWire): Story {
     .slice(0, STORY_LIMITS.scenes)
     .map((scene) => {
       const lines: StoryLine[] = scene.lines
-        .map((line) => ({
-          // Anything that is not a known character is read by the narrator.
-          speaker: cast.renamed.get(line.speaker.trim()) ?? NARRATOR,
-          text: clip(line.text, STORY_LIMITS.lineText),
-        }))
+        .map((line) => {
+          const how = clip(line.how ?? "", STORY_LIMITS.delivery);
+          return {
+            // Anything that is not a known character is read by the narrator.
+            speaker: cast.renamed.get(line.speaker.trim()) ?? NARRATOR,
+            text: clip(line.text, STORY_LIMITS.lineText),
+            ...(how ? { how } : {}),
+          };
+        })
         .filter((line) => line.text.length > 0)
         .slice(0, STORY_LIMITS.linesPerScene - 1);
 
@@ -67,6 +72,7 @@ export function normalizeStory(wire: StoryWire): Story {
       return {
         id: "",
         locationId: places.renamed.get(scene.locationId.trim()) ?? places.items[0].id,
+        ...(scene.card ? { card: scene.card } : {}),
         onStage,
         lines,
       };
@@ -77,12 +83,13 @@ export function normalizeStory(wire: StoryWire): Story {
   if (scenes.length === 0) throw new Error("The story has no scenes with lines.");
 
   if (wire.isHealthTopic) {
+    // In another language the line is the translation, then the English sentence.
+    const ending = wire.disclaimer?.trim() || HEALTH_DISCLAIMER;
     const last = scenes[scenes.length - 1];
-    const pattern = new RegExp(HEALTH_DISCLAIMER.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "gi");
     last.lines = last.lines
-      .map((line) => ({ ...line, text: line.text.replace(pattern, "").replace(/\s+/g, " ").trim() }))
+      .map((line) => ({ ...line, text: withoutDisclaimer(line.text, [ending]) }))
       .filter((line) => line.text.length > 0);
-    last.lines.push({ speaker: NARRATOR, text: HEALTH_DISCLAIMER });
+    last.lines.push({ speaker: NARRATOR, text: ending });
   }
 
   return StorySchema.parse({
@@ -90,6 +97,7 @@ export function normalizeStory(wire: StoryWire): Story {
     aspectRatio: wire.aspectRatio,
     artStyle: clip(wire.artStyle, STORY_LIMITS.artStyle) || DEFAULT_ART_STYLE,
     narratorVoice: wire.narratorVoice,
+    ...(wire.calm ? { calm: true } : {}),
     characters: cast.items.map((c) => ({
       id: c.id,
       name: clip(c.name, STORY_LIMITS.name) || "Character",

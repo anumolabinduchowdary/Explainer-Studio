@@ -13,8 +13,14 @@ import { suggestCaption } from "@/lib/share";
 import { SceneResponseSchema, type FiveStepPrompt, type Storyboard } from "@/lib/schemas";
 import { useRecording } from "@/lib/useRecording";
 import { useRenderAssets } from "@/lib/useRenderAssets";
+import { TranslateResponseSchema, storyboardTexts, withStoryboardTexts, type Texts } from "@/lib/translate";
 import { getVisual } from "@/lib/visuals";
+import { thumbnailFrom } from "@/lib/thumbnail";
+import { checkFacts, textsKey, type FactsState } from "@/lib/checks";
+import type { YouTubeInfo } from "@/lib/youtube";
 import { ExportPanel } from "./ExportPanel";
+import { LanguagePanel } from "./LanguagePanel";
+import { QualityPanel } from "./QualityPanel";
 import { Player, type DrawFunction, type PlayerHandle } from "./Player";
 import { SceneList } from "./SceneList";
 import { VideoDetails } from "./VideoDetails";
@@ -22,10 +28,16 @@ import { Button } from "./ui";
 
 type Props = {
   prompt: FiveStepPrompt;
+  /** The language chosen on the Describe step, if any. */
+  language: string;
   storyboard: Storyboard;
+  /** The automatic fact check made when the storyboard was written. */
+  initialFacts: FactsState;
   /** False while another step or section is showing (this one stays mounted to keep its work). */
   active: boolean;
   apiKey: string;
+  /** Whether finished videos can be posted straight to YouTube. */
+  youtubeEnabled: boolean;
   onStoryboardChange: (update: (current: Storyboard) => Storyboard) => void;
   onBackToPrompt: () => void;
   onStartOver: () => void;
@@ -116,6 +128,99 @@ export function VideoStep(props: Props) {
     [onStoryboardChange, invalidate],
   );
 
+  /* ---------------- Other languages ---------------- */
+
+  // Each language's words, so switching back does not need translating again.
+  const [language, setLanguage] = useState(() => props.language.trim() || "Original");
+  const [versions, setVersions] = useState<string[]>(() => [props.language.trim() || "Original"]);
+  const saved = useRef(new Map<string, Texts>());
+  const [translating, setTranslating] = useState(false);
+  const [translateError, setTranslateError] = useState<ErrorInfo | null>(null);
+
+  const translateTo = async (target: string) => {
+    setTranslating(true);
+    setTranslateError(null);
+    try {
+      const { texts } = await postJson(
+        "/api/translate",
+        { language: target, kind: "storyboard", texts: storyboardTexts(storyboard) },
+        TranslateResponseSchema,
+        { apiKey: apiKey || undefined, timeoutMs: 75_000 },
+      );
+      saved.current.set(language, storyboardTexts(storyboard));
+      saved.current.set(target, texts);
+      changeStoryboard((current) => withStoryboardTexts(current, texts));
+      setLanguage(target);
+      setVersions((names) => (names.includes(target) ? names : [...names, target]));
+    } catch (err) {
+      setTranslateError(toErrorInfo(err));
+    } finally {
+      setTranslating(false);
+    }
+  };
+
+  const switchTo = (name: string) => {
+    const texts = saved.current.get(name);
+    if (!texts || name === language) return;
+    // Edits made in this language are kept for when it is shown again.
+    saved.current.set(language, storyboardTexts(storyboard));
+    changeStoryboard((current) => withStoryboardTexts(current, texts));
+    setLanguage(name);
+  };
+
+  /* ---------------- Quality ---------------- */
+
+  const [facts, setFacts] = useState<FactsState>(props.initialFacts);
+  const currentTexts = useMemo(() => textsKey(storyboardTexts(storyboard)), [storyboard]);
+  const factsOutOfDate = facts.status === "checked" && facts.texts !== currentTexts;
+
+  /** Checks the words again (for example after edits) and applies any fixes. */
+  const recheckFacts = async () => {
+    setFacts({ status: "checking" });
+    try {
+      const result = await checkFacts("explainer", language === "Original" ? "" : language, storyboardTexts(storyboard), apiKey);
+      const fixed = withStoryboardTexts(storyboard, result.texts);
+      if (Object.keys(result.texts).length) changeStoryboard((current) => withStoryboardTexts(current, result.texts));
+      setFacts({ status: "checked", result, texts: textsKey(storyboardTexts(fixed)) });
+    } catch (err) {
+      setFacts({ status: "failed", message: toErrorInfo(err).message });
+    }
+  };
+
+  /* ---------------- YouTube ---------------- */
+
+  /** The first scene, drawn wide (16:9) and settled, as the YouTube thumbnail. */
+  const makeThumbnail = useCallback(async (): Promise<string | null> => {
+    if (!assets) return null;
+    const wide: Storyboard = { ...storyboard, aspectRatio: "16:9" };
+    const canvas = document.createElement("canvas");
+    canvas.width = 1920;
+    canvas.height = 1080;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return null;
+    const first = wide.scenes[0];
+    drawFrame(ctx, wide, sceneStart(wide, 0) + Math.min(2, (first?.durationSec ?? 2) * 0.6), assets, { settled: true });
+    return thumbnailFrom(canvas, storyboard.title, assets.headingFont);
+  }, [assets, storyboard]);
+
+  const youtube = useMemo<YouTubeInfo | undefined>(
+    () =>
+      props.youtubeEnabled
+        ? {
+            kind: "explainer",
+            title: storyboard.title,
+            script: storyboardText,
+            language: language === "Original" ? "" : language,
+            health: storyboard.scenes.some((scene) => scene.body.includes(HEALTH_DISCLAIMER)),
+            aiVoices: false,
+            sources: facts.status === "checked" ? facts.result.sources : [],
+            apiKey,
+            makeThumbnail,
+          }
+        : undefined,
+    [props.youtubeEnabled, storyboard, storyboardText, language, apiKey, makeThumbnail, facts],
+  );
+
   const regenerate = async (sceneId: string, instruction: string) => {
     setRegeneratingId(sceneId);
     setSceneError(null);
@@ -168,6 +273,7 @@ export function VideoStep(props: Props) {
             fileBase={fileBase}
             live={recording.live}
             title={storyboard.title}
+            youtube={youtube}
             caption={suggestCaption({
               title: storyboard.title,
               health: storyboard.scenes.some((scene) => scene.body.includes(HEALTH_DISCLAIMER)),
@@ -189,6 +295,8 @@ export function VideoStep(props: Props) {
         </div>
 
         <div className="min-w-0 space-y-6">
+          <QualityPanel facts={facts} factsOutOfDate={factsOutOfDate} onCheckFacts={() => void recheckFacts()} />
+
           <VideoDetails
             title={storyboard.title}
             aspectRatio={storyboard.aspectRatio}
@@ -202,6 +310,18 @@ export function VideoStep(props: Props) {
             onAspectRatioChange={(aspectRatio) =>
               changeStoryboard((current) => ({ ...current, aspectRatio }))
             }
+          />
+
+          <LanguagePanel
+            current={language}
+            versions={versions}
+            busy={translating}
+            error={translateError}
+            disabled={isRecording}
+            hasVoices={false}
+            onTranslate={translateTo}
+            onSwitch={switchTo}
+            onUseOwnKey={props.onUseOwnKey}
           />
 
           <SceneList

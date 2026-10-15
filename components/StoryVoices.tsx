@@ -13,13 +13,14 @@ import {
   type VoiceAge,
 } from "@/lib/story";
 import type { Clip } from "@/lib/storyAudio";
+import type { VoiceCheck } from "@/lib/quality";
 import { voiceMenu, type VoiceList, type VoiceOption } from "@/lib/voices";
 import { ErrorNotice } from "./ErrorNotice";
 import { Button, PlayIcon, SparkIcon, inputClass } from "./ui";
 
 export type ClipState =
   | { status: "recording" }
-  | { status: "ready"; clip: Clip }
+  | { status: "ready"; clip: Clip; check?: VoiceCheck }
   | { status: "failed"; error: ErrorInfo };
 
 export type ClipMap = Record<string, ClipState>;
@@ -50,6 +51,8 @@ type Props = {
   voiceList: VoiceList;
   voiceListState: "loading" | "ready" | "failed";
   onReloadVoices: () => void;
+  /** The language the lines are in. */
+  language: string;
   onStoryChange: (update: (current: Story) => Story) => void;
   onRecordMissing: () => void;
   onStop: () => void;
@@ -97,6 +100,13 @@ export function StoryVoices(props: Props) {
           ? "Voices listed under children or older voices really are that age. For any other voice, set the age: its pitch is then raised or lowered to match. Press Listen to check it."
           : "All the voices are adults. For a child or an older person, set the age: the voice then acts that age and its pitch is raised or lowered to match. Press Listen to check it."}
       </p>
+      {props.voiceListState === "ready" && !props.voiceList.supported && (
+        <p className="mt-2 rounded-xl bg-sun-soft px-3 py-2">
+          {provider === "speechgen"
+            ? `SpeechGen has no voices for ${props.language}, so English voices are offered. Listen before you record.`
+            : `OpenAI's voices are not trained for ${props.language}, so the lines may sound foreign or be misread. Listen before you record. For natural ${props.language} voices, switch on SpeechGen (see the README).`}
+        </p>
+      )}
       {props.voiceListState === "failed" && (
         <div className="mt-2 rounded-xl bg-sun-soft px-3 py-2" role="alert">
           <p>The list of voices could not be loaded, so voices can&apos;t be recorded yet.</p>

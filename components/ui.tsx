@@ -75,6 +75,17 @@ export function Spinner() {
   );
 }
 
+/** The app's mark: a play button with a spark. */
+export function Logo() {
+  return (
+    <svg width="32" height="32" viewBox="0 0 32 32" aria-hidden="true" className="shrink-0">
+      <rect width="32" height="32" rx="10" fill="#0F766E" />
+      <path d="M13 10.5v11l9-5.5z" fill="#FFFFFF" />
+      <circle cx="24.5" cy="7.5" r="3" fill="#F59E0B" />
+    </svg>
+  );
+}
+
 export function Card({ className = "", children }: { className?: string; children: ReactNode }) {
   return (
     <div className={`rounded-2xl border border-line bg-surface p-4 shadow-sm sm:p-5 ${className}`}>

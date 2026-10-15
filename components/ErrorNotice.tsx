@@ -11,6 +11,7 @@ const NO_RETRY: ReadonlySet<ErrorCode> = new Set([
   "server_misconfigured",
   "insecure_transport",
   "voice_key_invalid",
+  "not_allowed",
 ]);
 
 type Props = {
@@ -35,6 +36,20 @@ export function ErrorNotice({ error, onRetry, onUseOwnKey, className = "" }: Pro
         {error.message}
         {error.retryAfterSec ? ` You can try again in about ${error.retryAfterSec} seconds.` : ""}
       </p>
+      {error.code === "signed_out" && (
+        <p className="mt-2">
+          {/* A new tab, so the video being worked on here is not lost. */}
+          <a
+            href="/signin"
+            target="_blank"
+            rel="noopener"
+            className="font-semibold text-brand-strong underline underline-offset-4"
+          >
+            Sign in again (opens in a new tab)
+          </a>
+          , then come back here and press Try again.
+        </p>
+      )}
       {(canRetry || offerKey) && (
         <div className="mt-3 flex flex-wrap gap-2">
           {canRetry && (

@@ -9,6 +9,7 @@ import {
 } from "./story";
 import type { Sprite } from "./storyRenderer";
 import { VoicesResponseSchema, type VoiceList } from "./voices";
+import type { VoiceCheck } from "./quality";
 
 /** One AI-drawn picture, as the app keeps it (in memory only). */
 export type Picture = {
@@ -156,13 +157,18 @@ export function requestVoices(language: string): Promise<VoiceList> {
   return postJson("/api/voices", { language }, VoicesResponseSchema, { timeoutMs: 30_000 });
 }
 
-/** Asks the server to speak one line; resolves to an MP3 data URL. */
-export function requestSpeech(request: SpeechRequest, options: RequestOptions = {}): Promise<string> {
-  return retryWhenBusy(async () => {
-    const { audio } = await postJson("/api/speech", request, SpeechResponseSchema, {
-      apiKey: options.apiKey,
-      timeoutMs: 65_000,
-    });
-    return audio;
-  }, options);
+/** Asks the server to speak one line; resolves to an MP3 data URL and how well it was heard back. */
+export function requestSpeech(
+  request: SpeechRequest,
+  options: RequestOptions = {},
+): Promise<{ audio: string; check?: VoiceCheck }> {
+  return retryWhenBusy(
+    () =>
+      postJson("/api/speech", request, SpeechResponseSchema, {
+        apiKey: options.apiKey,
+        // Listening back, and sometimes recording again, takes longer than recording once.
+        timeoutMs: 90_000,
+      }),
+    options,
+  );
 }

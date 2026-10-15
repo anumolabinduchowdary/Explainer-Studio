@@ -3,8 +3,11 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { ErrorInfo } from "@/lib/errors";
 import {
+  MAX_EXERCISES,
   PLAN_LENGTHS,
   PLAN_LIMITS,
+  STORY_KIND_LABELS,
+  type PlanExercise,
   StoryPlanSchema,
   nextId,
   picturesNeeded,
@@ -13,8 +16,9 @@ import {
   type StoryPlan,
 } from "@/lib/plan";
 import { ASPECT_RATIOS, type AspectRatio } from "@/lib/schemas";
-import { VOICE_AGES, VOICE_AGE_SETTINGS, type VoiceAge } from "@/lib/story";
+import { STORY_LIMITS, VOICE_AGES, VOICE_AGE_SETTINGS, type VoiceAge } from "@/lib/story";
 import { ErrorNotice } from "./ErrorNotice";
+import { LanguagePicker } from "./LanguagePicker";
 import { SHAPE_LABELS } from "./VideoDetails";
 import { Button, Card, IconButton, SparkIcon, TrashIcon, inputClass } from "./ui";
 
@@ -22,6 +26,8 @@ type Props = {
   plan: StoryPlan;
   onChange: (plan: StoryPlan) => void;
   busy: boolean;
+  /** What the button says while busy, when not the default. */
+  busyLabel?: string;
   error: ErrorInfo | null;
   /** True once a story has been written from a plan at least once. */
   hasResult: boolean;
@@ -134,8 +140,13 @@ export function PlanStep(props: Props) {
       </h1>
       <p className="mt-2 max-w-2xl text-lg text-muted">
         This is who and what will be in your video. Change anything you like. The story will use
-        exactly these characters and places.
+        exactly these characters and places{plan.kind === "exercises" ? ", and exactly these exercises" : ""}.
       </p>
+      {plan.kind !== "story" && (
+        <p className="mt-2 inline-block rounded-full bg-brand-soft px-3 py-1 font-semibold text-brand-strong">
+          {STORY_KIND_LABELS[plan.kind]}
+        </p>
+      )}
 
       <form
         className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,3fr)_minmax(0,2fr)] lg:items-start"
@@ -390,6 +401,109 @@ export function PlanStep(props: Props) {
             </section>
           </Card>
 
+          {plan.kind === "exercises" && (
+            <Card>
+              <section aria-labelledby="plan-exercises-title">
+                <h2 id="plan-exercises-title" className="font-display text-xl font-bold">
+                  Exercises ({plan.exercises.length})
+                </h2>
+                <p className="mt-0.5 text-muted">
+                  Shown one after another, each on a card with its own picture. The video uses
+                  exactly these words and amounts.
+                </p>
+                {problem(["exercises"]) && (
+                  <p className="mt-2 font-semibold text-danger" role="alert">
+                    {problem(["exercises"])}
+                  </p>
+                )}
+                <ol className="mt-3 space-y-3">
+                  {plan.exercises.map((exercise, i) => {
+                    const base = ["exercises", i] as const;
+                    const setExercise = (change: Partial<PlanExercise>) =>
+                      onChange({
+                        ...plan,
+                        exercises: plan.exercises.map((item, j) => (j === i ? { ...item, ...change } : item)),
+                      });
+                    const field = (
+                      key: "name" | "steps" | "dose" | "look" | "caution",
+                      label: string,
+                      max: number,
+                      rows = 1,
+                      placeholder = "",
+                    ) => {
+                      const error = problem([...base, key]);
+                      const fid = fieldId([...base, key]);
+                      const common = {
+                        id: fid,
+                        value: exercise[key],
+                        maxLength: max,
+                        placeholder,
+                        "aria-invalid": error ? true : undefined,
+                        "aria-describedby": error ? `${fid}-error` : undefined,
+                        className: `${inputClass} ${rows > 1 ? "field-sizing-content min-h-16 resize-y leading-relaxed" : ""} ${error ? "border-danger" : ""}`,
+                      };
+                      return (
+                        <div className="mt-2">
+                          <label htmlFor={fid} className="mb-1 block font-semibold">
+                            {label}
+                          </label>
+                          {rows > 1 ? (
+                            <textarea {...common} rows={rows} onChange={(event) => setExercise({ [key]: event.target.value })} />
+                          ) : (
+                            <input {...common} type="text" onChange={(event) => setExercise({ [key]: event.target.value })} />
+                          )}
+                          {error && (
+                            <p id={`${fid}-error`} className="mt-1 font-semibold text-danger" role="alert">
+                              {error}
+                            </p>
+                          )}
+                        </div>
+                      );
+                    };
+                    return (
+                      <li key={exercise.id}>
+                        <fieldset className="min-w-0 rounded-2xl border border-line bg-canvas p-3">
+                          <legend className="sr-only">Exercise {i + 1}</legend>
+                          <div className="flex items-start gap-2">
+                            <div className="min-w-0 flex-1">{field("name", `Exercise ${i + 1}: name`, 60)}</div>
+                            <IconButton
+                              label={`Remove ${exercise.name || `exercise ${i + 1}`}`}
+                              disabled={plan.exercises.length <= 1}
+                              onClick={() => onChange({ ...plan, exercises: plan.exercises.filter((_, j) => j !== i) })}
+                              className="mt-9 hover:text-danger"
+                            >
+                              <TrashIcon />
+                            </IconButton>
+                          </div>
+                          {field("steps", "How to do it", 300, 2)}
+                          {field("dose", "How much", 80, 1, "e.g. 10 times, 2 rounds")}
+                          {field("look", "The picture shows", PLAN_LIMITS.look, 2, "e.g. A boy lying on his back on a mat, knees bent, lifting his hips.")}
+                          {field("caution", "Safety note (optional)", 160)}
+                        </fieldset>
+                      </li>
+                    );
+                  })}
+                </ol>
+                <Button
+                  compact
+                  className="mt-3"
+                  disabled={plan.exercises.length >= MAX_EXERCISES}
+                  onClick={() =>
+                    onChange({
+                      ...plan,
+                      exercises: [
+                        ...plan.exercises,
+                        { id: nextId("e", plan.exercises), name: "", steps: "", dose: "", look: "", caution: "" },
+                      ],
+                    })
+                  }
+                >
+                  Add an exercise
+                </Button>
+              </section>
+            </Card>
+          )}
+
           {/* ---------------------------------------------------------- */}
           <Card>
             <label htmlFor={fieldId(["message"])} className="font-display text-xl font-bold">
@@ -462,20 +576,12 @@ export function PlanStep(props: Props) {
                     ))}
                   </select>
                 </div>
-                <div className="min-w-0">
-                  <label htmlFor={fieldId(["language"])} className="mb-1 block font-semibold">
-                    Language
-                  </label>
-                  <input
-                    id={fieldId(["language"])}
-                    type="text"
-                    value={plan.language}
-                    maxLength={PLAN_LIMITS.language}
-                    placeholder="e.g. English"
-                    onChange={(event) => onChange({ ...plan, language: event.target.value })}
-                    className={inputClass}
-                  />
-                </div>
+                <LanguagePicker
+                  id={fieldId(["language"])}
+                  label="Language"
+                  value={plan.language}
+                  onChange={(language) => onChange({ ...plan, language })}
+                />
                 <div className="min-w-0">
                   <label htmlFor={fieldId(["tone"])} className="mb-1 block font-semibold">
                     Tone
@@ -491,6 +597,37 @@ export function PlanStep(props: Props) {
                   />
                 </div>
               </div>
+              <label className="mt-3 flex min-h-11 cursor-pointer items-start gap-2">
+                <input
+                  type="checkbox"
+                  checked={plan.calm}
+                  onChange={(event) => onChange({ ...plan, calm: event.target.checked })}
+                  className="mt-1 size-5 accent-brand"
+                />
+                <span>
+                  <span className="font-semibold">Calm, sensory-friendly</span>
+                  <span className="block text-sm text-muted">
+                    No flashes, gentler movement and more time between lines. On for Social Stories.
+                  </span>
+                </span>
+              </label>
+              <label htmlFor={fieldId(["style"])} className="mb-1 mt-3 block font-semibold">
+                Drawing style <span className="font-normal text-muted">(optional)</span>
+              </label>
+              <textarea
+                id={fieldId(["style"])}
+                value={plan.style}
+                rows={2}
+                maxLength={STORY_LIMITS.artStyle}
+                aria-describedby={`${fieldId(["style"])}-hint`}
+                placeholder="Standard: a friendly 2D cartoon with bold outlines, bright colours and big eyes."
+                onChange={(event) => onChange({ ...plan, style: event.target.value })}
+                className={`${inputClass} field-sizing-content max-h-60 min-h-16 resize-y leading-relaxed`}
+              />
+              <p id={`${fieldId(["style"])}-hint`} className="mt-1 text-sm text-muted">
+                Every character and place is drawn as a cartoon in this style. Describe the look in
+                plain words, for example &ldquo;soft watercolour cartoon with pastel colours&rdquo;.
+              </p>
               <label htmlFor={fieldId(["notes"])} className="mb-1 mt-3 block font-semibold">
                 Anything else <span className="font-normal text-muted">(optional)</span>
               </label>
@@ -541,7 +678,7 @@ export function PlanStep(props: Props) {
               </div>
             </dl>
             <p className="mt-3 rounded-xl bg-sun-soft px-3 py-2">
-              About {picturesNeeded(plan)} drawings are needed: 4 for each character and 1 for each
+              About {picturesNeeded(plan)} drawings are needed: 6 for each character and 1 for each
               place. A bigger cast takes longer to draw and costs more.
             </p>
           </Card>
@@ -556,7 +693,7 @@ export function PlanStep(props: Props) {
           <div className="flex flex-col gap-2 sm:flex-row-reverse sm:justify-end">
             <Button variant="primary" type="submit" loading={busy}>
               {!busy && <SparkIcon />}
-              {busy ? "Writing your story…" : props.hasResult ? "Write a new story" : "Write the story"}
+              {busy ? props.busyLabel || "Writing your story…" : props.hasResult ? "Write a new story" : "Write the story"}
             </Button>
             <Button disabled={busy} onClick={props.onBack}>
               Back

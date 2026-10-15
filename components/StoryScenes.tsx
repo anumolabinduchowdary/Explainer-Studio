@@ -288,6 +288,18 @@ function SceneEditor({ story, scene, index, count, onUpdate, onDelete }: CardPro
                 onChange={(event) => setLine(lineIndex, { text: event.target.value })}
                 className={`${inputClass} field-sizing-content mt-2 min-h-11 resize-y leading-relaxed`}
               />
+              <label htmlFor={`${id}-how-${lineIndex}`} className="mb-1 mt-2 block text-sm font-semibold">
+                How it is said <span className="font-normal text-muted">(guides the voice)</span>
+              </label>
+              <input
+                id={`${id}-how-${lineIndex}`}
+                type="text"
+                value={line.how ?? ""}
+                maxLength={STORY_LIMITS.delivery}
+                placeholder="e.g. surprised, then laughing"
+                onChange={(event) => setLine(lineIndex, { how: event.target.value })}
+                className={`${inputClass} min-h-11 text-sm`}
+              />
             </li>
           ))}
         </ol>

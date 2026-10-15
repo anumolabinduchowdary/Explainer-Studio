@@ -2,7 +2,7 @@ import { StoryFromPlanRequestSchema, StoryFromPlanWireSchema } from "@/lib/plan"
 import { createPostHandler } from "@/lib/server/handler";
 import { buildStoryFromPlan } from "@/lib/server/normalizePlan";
 import { generateStructured, moderate } from "@/lib/server/openai";
-import { STORY_INSTRUCTIONS, storyInput } from "@/lib/server/systemPrompts";
+import { storyInput, storyInstructions } from "@/lib/server/systemPrompts";
 
 export const maxDuration = 60;
 
@@ -18,7 +18,7 @@ export const POST = createPostHandler({
     const story = await generateStructured({
       client,
       name: "cartoon_story",
-      instructions: STORY_INSTRUCTIONS,
+      instructions: storyInstructions(body.plan.kind),
       input,
       schema: StoryFromPlanWireSchema,
       refine: (wire) => buildStoryFromPlan(body.plan, wire),

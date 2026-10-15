@@ -42,12 +42,17 @@ const NO_EXTRAS = "No text, letters, numbers, captions, logos or watermarks anyw
  * we never ask for an artist's, studio's or existing character's style.
  */
 export function imagePrompt(request: ImageRequest): string {
+  const prompt = basePrompt(request);
+  return request.fix ? `${prompt} Important, the last attempt got this wrong, so make sure: ${request.fix}` : prompt;
+}
+
+function basePrompt(request: ImageRequest): string {
   const style = request.artStyle || DEFAULT_ART_STYLE;
   switch (request.kind) {
     case "character":
       return [
         `Art style: ${style}.`,
-        `Draw one single character: ${request.look}`,
+        `Draw one single cartoon character, as an illustration and never a photograph: ${request.look}`,
         "Show the whole character from head to toe, standing upright in a relaxed, friendly pose, turned slightly towards the right of the picture (three-quarter view).",
         "The mouth is closed in a gentle smile. Eyes open.",
         "Centre the character with a small margin on every side so nothing is cut off.",
@@ -70,6 +75,24 @@ export function imagePrompt(request: ImageRequest): string {
         "Change the arms only: the character lifts one hand to about chest height with an open palm, the way people do when explaining something in conversation.",
         "If the character holds or uses a walker, wheelchair, cane or any other aid, keep it exactly as it is and keep a hand on it; gesture with the free hand only. If the character has no arms, tilt the body slightly instead.",
         "The mouth stays closed in a gentle smile. Keep the background transparent.",
+        NO_EXTRAS,
+      ].join(" ");
+    case "explain":
+      return [
+        `This is a cartoon character for an animation: ${request.look}`,
+        "Redraw exactly the same character: the same drawing style, face, hair, clothes, colours, outline and size, standing in the same place with the feet where they are now.",
+        "Change the arms only: both hands are held open in front of the body at waist height, palms turned up, the way people do when they explain something warmly.",
+        "If the character holds or uses a walker, wheelchair, cane or any other aid, keep it exactly as it is and keep a hand on it; open the free hand only. If the character has no arms, tilt the body slightly instead.",
+        "The mouth stays closed in a gentle smile. Keep the background transparent.",
+        NO_EXTRAS,
+      ].join(" ");
+    case "exercise":
+      return [
+        `Art style: ${style}.`,
+        `Draw a clear, friendly instruction picture for a home exercise: ${request.look}`,
+        "Show the whole body from a side or three-quarter view so the position is easy to see and copy, with a natural, safe posture.",
+        "Use a plain, light background, with a soft mat if the exercise is done on the floor. Show only the people and equipment the description mentions.",
+        "Draw everyone respectfully. Any mobility aid or assistive device must look correct.",
         NO_EXTRAS,
       ].join(" ");
     case "background":
@@ -101,7 +124,7 @@ export async function generatePicture(
   };
 
   let result;
-  if (request.kind === "talking" || request.kind === "gesture") {
+  if (request.kind === "talking" || request.kind === "gesture" || request.kind === "explain") {
     const base64 = request.reference?.split(",")[1] ?? "";
     const reference = await toFile(Buffer.from(base64, "base64"), "character.png", {
       type: "image/png",
@@ -114,6 +137,11 @@ export async function generatePicture(
         size: PORTRAIT,
         background: "transparent",
       },
+      { signal },
+    );
+  } else if (request.kind === "exercise") {
+    result = await client.images.generate(
+      { ...shared, model: imageModel(), size: "1024x1024", background: "opaque" },
       { signal },
     );
   } else {

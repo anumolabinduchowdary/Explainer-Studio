@@ -5,6 +5,15 @@ import type { ErrorInfo } from "@/lib/errors";
 import { EXAMPLES } from "@/lib/sample";
 import { LIMITS, type VideoKind } from "@/lib/schemas";
 import { ErrorNotice } from "./ErrorNotice";
+import { LanguagePicker } from "./LanguagePicker";
+import {
+  KIND_COPY,
+  StoryKindFields,
+  StoryKindPicker,
+  type ChildDetails,
+  type TherapyDetails,
+} from "./StoryKindFields";
+import type { StoryKind } from "@/lib/plan";
 import { SpeakButton } from "./SpeakButton";
 import { Button, Card, SparkIcon, inputClass } from "./ui";
 
@@ -56,6 +65,16 @@ type Props = {
   kind: VideoKind;
   description: string;
   onDescriptionChange: (value: string) => void;
+  /** The language the video should be in; empty means the language the description is written in. */
+  language: string;
+  onLanguageChange: (value: string) => void;
+  /** Cartoon stories only: what kind of story, and its extra details. */
+  storyKind: StoryKind;
+  onStoryKindChange: (kind: StoryKind) => void;
+  child: ChildDetails;
+  onChildChange: (child: ChildDetails) => void;
+  therapy: TherapyDetails;
+  onTherapyChange: (therapy: TherapyDetails) => void;
   /** Clarifying questions from the AI, if it needs more detail. */
   questions: string[];
   busy: boolean;
@@ -72,7 +91,11 @@ type Props = {
 export function DescribeStep(props: Props) {
   const { description, onDescriptionChange, questions, busy, error } = props;
   const fieldId = useId();
-  const copy = COPY[props.kind];
+  const isStory = props.kind === "story";
+  const storyKind = isStory ? props.storyKind : "story";
+  const copy = isStory ? { ...COPY.story, ...KIND_COPY[storyKind] } : COPY[props.kind];
+  const [showExercisesError, setShowExercisesError] = useState(false);
+  const exercisesMissing = isStory && storyKind === "exercises" && props.therapy.exercises.trim().length < 10;
   const headingRef = useRef<HTMLHeadingElement>(null);
   const [showLengthError, setShowLengthError] = useState(false);
   const tooShort = description.trim().length < LIMITS.descriptionMin;
@@ -90,11 +113,17 @@ export function DescribeStep(props: Props) {
       return;
     }
     setShowLengthError(false);
+    if (exercisesMissing) {
+      setShowExercisesError(true);
+      return;
+    }
+    setShowExercisesError(false);
     props.onBuild();
   };
 
   return (
     <div className="mx-auto max-w-2xl">
+      {isStory && <StoryKindPicker kind={storyKind} onKindChange={props.onStoryKindChange} disabled={busy} />}
       <h1 ref={headingRef} tabIndex={-1} className="font-display text-3xl font-bold sm:text-4xl">
         <label htmlFor={fieldId}>{copy.title}</label>
       </h1>
@@ -133,7 +162,35 @@ export function DescribeStep(props: Props) {
           </p>
         </div>
 
-        <div className="mt-2">
+        {isStory && (
+          <StoryKindFields
+            kind={storyKind}
+            onKindChange={props.onStoryKindChange}
+            child={props.child}
+            onChildChange={props.onChildChange}
+            therapy={props.therapy}
+            onTherapyChange={(therapy) => {
+              props.onTherapyChange(therapy);
+              setShowExercisesError(false);
+            }}
+            disabled={busy}
+            exercisesError={showExercisesError && exercisesMissing ? "Please list the exercises, one per line." : undefined}
+          />
+        )}
+
+        <div className="mt-4 max-w-sm">
+          <LanguagePicker
+            id={`${fieldId}-language`}
+            label="Language of the video"
+            value={props.language}
+            onChange={props.onLanguageChange}
+            autoLabel="Same as I write"
+            hint="The words on screen and the voices will be in this language."
+            disabled={busy}
+          />
+        </div>
+
+        <div className="mt-4">
           <SpeakButton
             apiKey={props.apiKey}
             disabled={busy}
@@ -148,7 +205,7 @@ export function DescribeStep(props: Props) {
           />
         </div>
 
-        <div className="mt-4">
+        <div className="mt-4" hidden={storyKind !== "story"}>
           <p className="mb-2 font-semibold" id={`${fieldId}-examples`}>
             Or start from an example:
           </p>

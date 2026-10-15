@@ -3,7 +3,9 @@
 import { formatBytes } from "@/lib/download";
 import type { RecordingFormat, RecordingState } from "@/lib/recorder";
 import { formatTime } from "@/lib/renderer";
+import type { YouTubeInfo } from "@/lib/youtube";
 import { SharePanel } from "./SharePanel";
+import { YouTubePanel } from "./YouTubePanel";
 import { Button, Card, DownloadIcon, RecordIcon } from "./ui";
 
 type Props = {
@@ -29,6 +31,8 @@ type Props = {
   /** The video's title and a suggested caption, used when sharing. */
   title: string;
   caption: string;
+  /** Set when YouTube uploads are switched on: what the YouTube panel needs to post this video. */
+  youtube?: YouTubeInfo;
 };
 
 export function ExportPanel(props: Props) {
@@ -74,6 +78,7 @@ export function ExportPanel(props: Props) {
               title={props.title}
               defaultCaption={props.caption}
             />
+            {props.youtube && <YouTubePanel key={`yt-${state.url}`} video={state.video} info={props.youtube} />}
           </div>
         )}
 

@@ -7,6 +7,7 @@ import { HEALTH_DISCLAIMER } from "@/lib/config";
 import { toAppError } from "@/lib/server/appError";
 import { createPostHandler } from "@/lib/server/handler";
 import { generatePicture, imagePrompt } from "@/lib/server/images";
+import { StoryFromPlanWireSchema } from "@/lib/plan";
 import { normalizeStory } from "@/lib/server/normalizeStory";
 import type { OpenAIClient } from "@/lib/server/openai";
 import { resetRateLimits } from "@/lib/server/rateLimit";
@@ -229,14 +230,22 @@ describe("normalizeStory", () => {
     ).toThrow();
   });
 
-  it("converts to strict JSON Schema for Structured Outputs", () => {
-    const format = zodTextFormat(StoryWireSchema, "cartoon_story");
+  it("asks the story writer for a strict JSON Schema, with a delivery note on every line", () => {
+    const format = zodTextFormat(StoryFromPlanWireSchema, "cartoon_story");
     expect(format.strict).toBe(true);
-    const schema = format.schema as { required: string[]; additionalProperties: boolean };
+    const schema = format.schema as {
+      required: string[];
+      additionalProperties: boolean;
+      properties: { scenes: { items: { properties: { lines: { items: { required: string[] } } } } } };
+    };
     expect(schema.additionalProperties).toBe(false);
     expect([...schema.required].sort()).toEqual(
-      ["artStyle", "aspectRatio", "characters", "isHealthTopic", "locations", "narratorVoice", "scenes", "title"].sort(),
+      // No art style: the plan's drawing style, from the person's own description, is used instead.
+      ["disclaimer", "isHealthTopic", "narratorVoice", "scenes", "title", "voices"].sort(),
     );
+    expect(schema.properties.scenes.items.properties.lines.items.required.sort()).toEqual(["how", "speaker", "text"]);
+    // The older, fuller shape is still accepted on the server side.
+    expect(StoryWireSchema.safeParse(wire()).success).toBe(true);
   });
 });
 
@@ -277,6 +286,7 @@ describe("picture requests", () => {
     expect(character).toContain("A cheerful boy with a blue walker.");
     expect(character).toContain("flat cartoon");
     expect(character).toContain("Transparent background");
+    expect(imagePrompt(request())).toContain("Draw one single cartoon character, as an illustration and never a photograph:");
     const background = imagePrompt(request({ kind: "background", look: "A sunny park." }));
     expect(background).toContain("A sunny park.");
     expect(background).toContain("no people");
@@ -378,7 +388,12 @@ describe("voices", () => {
       voice: meera.voice,
       age: meera.voiceAge,
       style: meera.voiceStyle,
+      delivery: "",
     });
+    // A line's own delivery note travels with it, and a new note means a new recording.
+    const noted = { ...firstScene.lines[1], how: "surprised, then laughing" };
+    expect(lineVoice(story, noted).delivery).toBe("surprised, then laughing");
+    expect(clipKey(story, noted)).not.toBe(clipKey(story, firstScene.lines[1]));
   });
 
   it("keeps a clip when a line moves, and asks for a new one when the words or voice change", () => {

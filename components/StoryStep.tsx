@@ -1,7 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { toErrorInfo } from "@/lib/api";
+import { postJson, toErrorInfo } from "@/lib/api";
+import type { ErrorInfo } from "@/lib/errors";
 import { downloadText, slugify } from "@/lib/download";
 import type { ExportJob } from "@/lib/exportVideo";
 import { useEndCardImage, withEndCard } from "@/lib/endCard";
@@ -11,12 +12,14 @@ import { suggestCaption } from "@/lib/share";
 import { dimensionsFor } from "@/lib/renderer";
 import {
   NARRATOR,
+  characterName,
   clipKey,
   estimateLine,
   lineStarts,
   lineVoice,
   pictureKey,
   storyDuration,
+  SCENE_LEAD_SEC,
   storySceneStart,
   type Story,
   type StoryLine,
@@ -41,27 +44,43 @@ import {
 } from "@/lib/storyRenderer";
 import { useRecording } from "@/lib/useRecording";
 import { OPENAI_VOICE_LIST, ageRate, castVoices, type VoiceList } from "@/lib/voices";
+import { thumbnailFrom } from "@/lib/thumbnail";
+import { checkDrawing, checkFacts, textsKey, type FactsState } from "@/lib/checks";
+import type { PictureCheck } from "@/lib/quality";
+import { TranslateResponseSchema, storyTexts, withStoryTexts, type Texts } from "@/lib/translate";
+import type { YouTubeInfo } from "@/lib/youtube";
 import { useCanvasFonts } from "@/lib/useRenderAssets";
 import { ExportPanel } from "./ExportPanel";
+import { LanguagePanel } from "./LanguagePanel";
+import { QualityPanel, type PictureSummary, type VoiceSummary } from "./QualityPanel";
 import { Player, type DrawFunction, type PlayerHandle, type Transport } from "./Player";
-import { StoryPictures, characterNeedsDrawing, needsDrawing, pictureSource } from "./StoryPictures";
+import { StoryPictures, cardScenes, characterNeedsDrawing, needsDrawing, pictureSource } from "./StoryPictures";
 import { StoryScenes } from "./StoryScenes";
 import { StoryVoices, clipKeysNeeded, type ClipMap, type ClipState } from "./StoryVoices";
 import { VideoDetails } from "./VideoDetails";
 import { Button } from "./ui";
 
-/** A short breath after each spoken line. */
-const VOICE_PAUSE_SEC = 0.35;
+/**
+ * A short breath after each spoken line. An answer follows a question a little
+ * faster, as it does in real conversation, so the exchange does not sound
+ * like turns being read out.
+ */
+const pauseAfter = (line: StoryLine, calm = false) =>
+  (line.text.trim().endsWith("?") ? 0.22 : 0.35) + (calm ? 0.5 : 0);
 
 type Batch = { done: number; total: number } | null;
 
 type Props = {
   /** The plan the story was written from, offered as a download. */
   plan: StoryPlan;
+  /** The automatic fact check made when the story was written. */
+  initialFacts: FactsState;
   story: Story;
   /** False while another step or section is showing (this one stays mounted to keep its pictures). */
   active: boolean;
   apiKey: string;
+  /** Whether finished videos can be posted straight to YouTube. */
+  youtubeEnabled: boolean;
   onStoryChange: (update: (current: Story) => Story) => void;
   onBackToPlan: () => void;
   onStartOver: () => void;
@@ -115,6 +134,10 @@ export function StoryStep(props: Props) {
 
   // Pictures and voice clips live in memory only: nothing is uploaded or saved anywhere.
   const [pictures, setPictures] = useState<PictureMap>({});
+  // The result of comparing each standing pose and background with its description.
+  const [pictureChecks, setPictureChecks] = useState<
+    Record<string, { source: string; matches: boolean | null; problems: string[]; redraws: number }>
+  >({});
   const [mouthOff, setMouthOff] = useState<ReadonlySet<string>>(() => new Set());
   // Hand gestures: an extra pose per character. On for the story, with a switch per character.
   const [gesturesOn, setGesturesOn] = useState(true);
@@ -130,12 +153,12 @@ export function StoryStep(props: Props) {
   const [voiceListState, setVoiceListState] = useState<"loading" | "ready" | "failed">("loading");
 
   // Drawing and recording take a while, so the jobs read the latest values through refs.
-  const live = useRef({ story, apiKey, pictures, clips, gesturesOn, voiceList });
+  const live = useRef({ story, apiKey, pictures, clips, gesturesOn, voiceList, language: plan.language, pictureChecks });
   const aliveRef = useRef(true);
   const stopPicturesRef = useRef(false);
   const stopVoicesRef = useRef(false);
   useEffect(() => {
-    live.current = { story, apiKey, pictures, clips, gesturesOn, voiceList };
+    live.current = { ...live.current, story, apiKey, pictures, clips, gesturesOn, voiceList, pictureChecks };
   });
   useEffect(() => {
     aliveRef.current = true;
@@ -173,12 +196,12 @@ export function StoryStep(props: Props) {
       const clip = readyClip(line);
       if (!clip) return estimateLine(line);
       return {
-        duration: clip.duration + VOICE_PAUSE_SEC,
+        duration: clip.duration + pauseAfter(line, story.calm === true),
         speechStart: clip.speechStart,
         speechEnd: clip.speechEnd,
       };
     },
-    [readyClip],
+    [readyClip, story.calm],
   );
   const duration = storyDuration(story, timeLine);
 
@@ -232,20 +255,32 @@ export function StoryStep(props: Props) {
       if (!idle) continue;
       const mouth = !mouthOff.has(character.id);
       const talk = mouth ? ready(pictureKey.talking(character.id)) : undefined;
-      const raised =
-        gesturesOn && !gestureOff.has(character.id) ? ready(pictureKey.gesture(character.id)) : undefined;
-      const gesture = raised
-        ? { idle: raised, talk: mouth ? ready(pictureKey.gestureTalking(character.id)) : undefined }
-        : undefined;
-      characters.set(character.id, { idle, talk, gesture });
+      // Each gesture pose that has been drawn, with its mouth-open twin when there is one.
+      const gestures: NonNullable<CharacterSprites["gestures"]> = [];
+      if (gesturesOn && !gestureOff.has(character.id)) {
+        for (const [still, talking] of [
+          [pictureKey.gesture(character.id), pictureKey.gestureTalking(character.id)],
+          [pictureKey.explain(character.id), pictureKey.explainTalking(character.id)],
+        ]) {
+          const pose = ready(still);
+          if (pose) gestures.push({ idle: pose, talk: mouth ? ready(talking) : undefined });
+        }
+      }
+      characters.set(character.id, { idle, talk, gestures });
     }
     for (const location of story.locations) {
       const sprite = ready(pictureKey.place(location.id));
       if (sprite) places.set(location.id, sprite);
     }
+    const cards = new Map<string, Sprite>();
+    for (const scene of story.scenes) {
+      const sprite = scene.card ? ready(pictureKey.card(scene.id)) : undefined;
+      if (sprite) cards.set(scene.id, sprite);
+    }
     return {
       characters,
       places,
+      cards,
       headingFont: fonts.heading,
       timeLine,
       mouthOpen: (line, lineLocal) => {
@@ -261,6 +296,7 @@ export function StoryStep(props: Props) {
     gestureOff,
     story.characters,
     story.locations,
+    story.scenes,
     timeLine,
     readyClip,
   ]);
@@ -340,9 +376,42 @@ export function StoryStep(props: Props) {
   );
 
   /**
+   * Compares a fresh drawing with its description, and redraws it with the
+   * corrections (at most twice) until it matches. Resolves to the final
+   * drawing's data URL. If the check cannot be made, the drawing is kept.
+   */
+  async function checkUntilRight(
+    key: string,
+    kind: "character" | "background" | "exercise",
+    look: string,
+    image: string,
+    source: string,
+    redraw: (fix: string) => Promise<string | null>,
+  ): Promise<string> {
+    let current = image;
+    let redraws = 0;
+    let check: PictureCheck | null = await checkDrawing(kind, look, current, live.current.apiKey);
+    while (check && !check.matches && redraws < 2 && aliveRef.current) {
+      redraws += 1;
+      const again = await redraw(check.problems.join(" "));
+      if (!again) break;
+      current = again;
+      check = await checkDrawing(kind, look, current, live.current.apiKey);
+    }
+    if (aliveRef.current) {
+      setPictureChecks((all) => ({
+        ...all,
+        [key]: { source, matches: check ? check.matches : null, problems: check?.problems ?? [], redraws },
+      }));
+    }
+    return current;
+  }
+
+  /**
    * Draws a character's pictures as a chain: standing, then the same with the
-   * mouth open, then (with gestures on) a hand raised, then that with the
-   * mouth open. Each is redrawn from the one before it, so they match.
+   * mouth open, then (with gestures on) a hand raised and both hands open,
+   * each also with the mouth open. Each is redrawn from the one it is based
+   * on, so they match.
    * With `onlyMissing`, pictures that are already up to date are kept.
    */
   const drawCharacter = useCallback(
@@ -355,6 +424,8 @@ export function StoryStep(props: Props) {
         talk: pictureKey.talking(characterId),
         gesture: pictureKey.gesture(characterId),
         gestureTalk: pictureKey.gestureTalking(characterId),
+        explain: pictureKey.explain(characterId),
+        explainTalk: pictureKey.explainTalking(characterId),
       };
       const source = pictureSource.character(current, character);
       const request = {
@@ -367,18 +438,19 @@ export function StoryStep(props: Props) {
       /** Draws one picture of the chain. Resolves to its data URL, or null if it failed. */
       const step = async (
         key: string,
-        kind: "character" | "talking" | "gesture",
+        kind: "character" | "talking" | "gesture" | "explain",
         from?: string,
+        fix?: string,
       ): Promise<string | null> => {
         const existing = before[key];
-        if (onlyMissing && existing?.status === "ready" && existing.picture.source === source) {
+        if (!fix && onlyMissing && existing?.status === "ready" && existing.picture.source === source) {
           return existing.picture.dataUrl;
         }
-        setPicture(key, { status: "drawing" });
+        setPicture(key, { status: "drawing", ...(fix ? { note: "Drawing again to fix a mistake…" } : {}) });
         try {
           const reference = from ? await referencePng(from) : undefined;
           const dataUrl = await requestPicture(
-            { kind, ...request, ...(reference ? { reference } : {}) },
+            { kind, ...request, ...(reference ? { reference } : {}), ...(fix ? { fix } : {}) },
             pictureOptions(key),
           );
           const sprite = await loadSprite(dataUrl, true);
@@ -391,15 +463,28 @@ export function StoryStep(props: Props) {
       };
 
       if (!onlyMissing) {
-        for (const key of [keys.talk, keys.gesture, keys.gestureTalk]) setPicture(key, null);
+        for (const key of [keys.talk, keys.gesture, keys.gestureTalk, keys.explain, keys.explainTalk]) {
+          setPicture(key, null);
+        }
       }
-      const idle = await step(keys.idle, "character");
+      let idle = await step(keys.idle, "character");
       if (!idle) return;
+      // The standing pose is compared with its description and redrawn (at most twice) if it is wrong.
+      // The other poses are drawn from it, so they inherit the fixes.
+      const known = live.current.pictureChecks[keys.idle];
+      if (!known || known.source !== source || !onlyMissing) {
+        const checked = await checkUntilRight(keys.idle, "character", character.look, idle, source, (fix) =>
+          step(keys.idle, "character", undefined, fix),
+        );
+        if (checked) idle = checked;
+      }
       // Everything after the standing pose is a bonus: if it fails, the character still works.
       await step(keys.talk, "talking", idle);
       if (!live.current.gesturesOn) return;
       const gesture = await step(keys.gesture, "gesture", idle);
       if (gesture) await step(keys.gestureTalk, "talking", gesture);
+      const explain = await step(keys.explain, "explain", idle);
+      if (explain) await step(keys.explainTalk, "talking", explain);
     },
     [pictureOptions, setPicture],
   );
@@ -412,22 +497,59 @@ export function StoryStep(props: Props) {
       const key = pictureKey.place(locationId);
       const source = pictureSource.place(current, location);
 
-      setPicture(key, { status: "drawing" });
-      try {
-        const dataUrl = await requestPicture(
-          {
-            kind: "background",
-            look: location.look,
-            artStyle: current.artStyle,
-            aspectRatio: current.aspectRatio,
-          },
-          pictureOptions(key),
-        );
-        const sprite = await loadSprite(dataUrl, false);
-        setPicture(key, { status: "ready", picture: { dataUrl, sprite, source } });
-      } catch (err) {
-        setPicture(key, { status: "failed", error: toErrorInfo(err) });
-      }
+      const draw = async (fix?: string): Promise<string | null> => {
+        setPicture(key, { status: "drawing", ...(fix ? { note: "Drawing again to fix a mistake…" } : {}) });
+        try {
+          const dataUrl = await requestPicture(
+            {
+              kind: "background",
+              look: location.look,
+              artStyle: current.artStyle,
+              aspectRatio: current.aspectRatio,
+              ...(fix ? { fix } : {}),
+            },
+            pictureOptions(key),
+          );
+          const sprite = await loadSprite(dataUrl, false);
+          setPicture(key, { status: "ready", picture: { dataUrl, sprite, source } });
+          return dataUrl;
+        } catch (err) {
+          setPicture(key, { status: "failed", error: toErrorInfo(err) });
+          return null;
+        }
+      };
+      const first = await draw();
+      if (first) await checkUntilRight(key, "background", location.look, first, source, draw);
+    },
+    [pictureOptions, setPicture],
+  );
+
+  /** Draws (and checks) the picture on a scene's exercise card. */
+  const drawCard = useCallback(
+    async (sceneId: string) => {
+      const current = live.current.story;
+      const scene = current.scenes.find((item) => item.id === sceneId);
+      if (!scene?.card) return;
+      const key = pictureKey.card(sceneId);
+      const source = pictureSource.card(current, scene);
+      const look = scene.card.look;
+      const draw = async (fix?: string): Promise<string | null> => {
+        setPicture(key, { status: "drawing", ...(fix ? { note: "Drawing again to fix a mistake…" } : {}) });
+        try {
+          const dataUrl = await requestPicture(
+            { kind: "exercise", look, artStyle: current.artStyle, aspectRatio: current.aspectRatio, ...(fix ? { fix } : {}) },
+            pictureOptions(key),
+          );
+          const sprite = await loadSprite(dataUrl, false);
+          setPicture(key, { status: "ready", picture: { dataUrl, sprite, source } });
+          return dataUrl;
+        } catch (err) {
+          setPicture(key, { status: "failed", error: toErrorInfo(err) });
+          return null;
+        }
+      };
+      const first = await draw();
+      if (first) await checkUntilRight(key, "exercise", look, first, source, draw);
     },
     [pictureOptions, setPicture],
   );
@@ -445,6 +567,11 @@ export function StoryStep(props: Props) {
       const state = drawn[pictureKey.place(location.id)];
       if (needsDrawing(state, pictureSource.place(current, location))) {
         jobs.push(() => drawPlace(location.id));
+      }
+    }
+    for (const scene of cardScenes(current)) {
+      if (needsDrawing(drawn[pictureKey.card(scene.id)], pictureSource.card(current, scene))) {
+        jobs.push(() => drawCard(scene.id));
       }
     }
     if (jobs.length === 0) return;
@@ -467,8 +594,11 @@ export function StoryStep(props: Props) {
    * OpenAI's voices; if the server speaks with another service, every speaker
    * is given one of that service's voices of the same gender and age.
    */
-  // The language the lines were written in: fixed when the story arrives, whatever happens to the plan later.
-  const [language] = useState(plan.language);
+  // The language the lines are in: the plan's when the story arrives, then whichever version is showing.
+  const [language, setLanguage] = useState(() => plan.language.trim() || "Original");
+  useEffect(() => {
+    live.current.language = language;
+  });
   const [voiceAttempt, setVoiceAttempt] = useState(0);
   useEffect(() => {
     let cancelled = false;
@@ -492,6 +622,204 @@ export function StoryStep(props: Props) {
     setVoiceAttempt((attempt) => attempt + 1);
   };
 
+  /* ---------------- Quality ---------------- */
+
+  const [facts, setFacts] = useState<FactsState>(props.initialFacts);
+  const currentTexts = useMemo(() => textsKey(storyTexts(story)), [story]);
+  const factsOutOfDate = facts.status === "checked" && facts.texts !== currentTexts;
+
+  /** Checks the words again (for example after edits) and applies any fixes. */
+  const recheckFacts = async () => {
+    setFacts({ status: "checking" });
+    const current = live.current.story;
+    try {
+      const result = await checkFacts("story", language === "Original" ? "" : language, storyTexts(current), apiKey);
+      if (!aliveRef.current) return;
+      const fixed = withStoryTexts(current, result.texts);
+      if (Object.keys(result.texts).length) changeStory((latest) => withStoryTexts(latest, result.texts));
+      setFacts({ status: "checked", result, texts: textsKey(storyTexts(fixed)) });
+    } catch (err) {
+      if (aliveRef.current) setFacts({ status: "failed", message: toErrorInfo(err).message });
+    }
+  };
+
+  const pictureSummary = useMemo<PictureSummary>(() => {
+    const main = [
+      ...story.characters.map((character) => ({
+        key: pictureKey.character(character.id),
+        name: character.name || "A character",
+        source: pictureSource.character(story, character),
+      })),
+      ...story.locations.map((location) => ({
+        key: pictureKey.place(location.id),
+        name: location.name || "A place",
+        source: pictureSource.place(story, location),
+      })),
+      ...cardScenes(story).map((scene) => ({
+        key: pictureKey.card(scene.id),
+        name: `Exercise "${scene.card?.title ?? ""}"`,
+        source: pictureSource.card(story, scene),
+      })),
+    ];
+    const drawn = main.filter((item) => {
+      const state = pictures[item.key];
+      return state?.status === "ready" && state.picture.source === item.source;
+    });
+    const checks = drawn
+      .map((item) => ({ item, check: pictureChecks[item.key] }))
+      .filter(({ check, item }) => check?.source === item.source);
+    return {
+      total: main.length,
+      drawn: drawn.length,
+      checked: checks.filter(({ check }) => check.matches !== null).length,
+      redrawn: checks.filter(({ check }) => check.redraws > 0).length,
+      problems: checks
+        .filter(({ check }) => check.matches === false)
+        .map(({ item, check }) => ({ name: item.name, problems: check.problems })),
+    };
+  }, [story, pictures, pictureChecks]);
+
+  const voiceSummary = useMemo<VoiceSummary>(() => {
+    const seen = new Set<string>();
+    const unique = story.scenes
+      .flatMap((scene) => scene.lines)
+      .filter((line) => {
+        const key = clipKey(story, line);
+        if (!line.text.trim() || seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
+    const ready = unique
+      .map((line) => ({ line, state: clips[clipKey(story, line)] }))
+      .filter(
+        (entry): entry is { line: StoryLine; state: Extract<ClipState, { status: "ready" }> } =>
+          entry.state?.status === "ready",
+      );
+    return {
+      total: unique.length,
+      recorded: ready.length,
+      checked: ready.filter(({ state }) => state.check && state.check.result !== "skipped").length,
+      retried: ready.filter(({ state }) => state.check?.retried).length,
+      unclear: ready
+        .filter(({ state }) => state.check?.result === "unclear")
+        .map(({ line }) => ({ who: characterName(story, line.speaker), text: line.text })),
+    };
+  }, [story, clips]);
+
+  /* ---------------- Make my video, in one go ---------------- */
+
+  const [making, setMaking] = useState<string | null>(null);
+  /** Draws and checks the pictures, records and checks the voices, then builds the video file. */
+  const makeVideo = async () => {
+    getAudio(); // created inside the click, as browsers require
+    setMaking("Drawing and checking the pictures…");
+    await drawMissing();
+    if (!aliveRef.current) return;
+    if (stopPicturesRef.current) {
+      setMaking(null);
+      return;
+    }
+    setMaking("Recording and checking the voices…");
+    await recordMissing();
+    if (!aliveRef.current) return;
+    if (stopVoicesRef.current) {
+      setMaking(null);
+      return;
+    }
+    setMaking("Creating the video file…");
+    // Let the page catch up with the last picture and voice before the file is built from them.
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    if (!aliveRef.current) return;
+    setMaking(null);
+    await recording.start();
+  };
+
+  /* ---------------- YouTube ---------------- */
+
+  /**
+   * The thumbnail: the scene with the most people in it, drawn wide (16:9) with
+   * everyone in place and no caption, and the title written large across it.
+   */
+  const makeThumbnail = useCallback(async (): Promise<string | null> => {
+    if (!assets || !fonts) return null;
+    const wide: Story = { ...story, aspectRatio: "16:9" };
+    const busiest = wide.scenes.reduce(
+      (best, scene, index) => (scene.onStage.length > wide.scenes[best].onStage.length ? index : best),
+      0,
+    );
+    const canvas = document.createElement("canvas");
+    canvas.width = 1920;
+    canvas.height = 1080;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return null;
+    // Just before the first line, when everyone has arrived and nobody is speaking yet.
+    const time = storySceneStart(wide, busiest, timeLine) + SCENE_LEAD_SEC * 0.95;
+    drawStoryFrame(ctx, wide, time, assets, { settled: true });
+    return thumbnailFrom(canvas, story.title, fonts.heading);
+  }, [assets, fonts, story, timeLine]);
+
+  const youtube = useMemo<YouTubeInfo | undefined>(
+    () =>
+      props.youtubeEnabled
+        ? {
+            kind: "story",
+            title: story.title,
+            script: story.scenes.flatMap((scene) => scene.lines.map((line) => line.text)).join("\n"),
+            language: language === "Original" ? "" : language,
+            health: story.scenes.some((scene) => scene.lines.some((line) => line.text.includes(HEALTH_DISCLAIMER))),
+            aiVoices: hasVoices,
+            sources: facts.status === "checked" ? facts.result.sources : [],
+            apiKey,
+            makeThumbnail,
+          }
+        : undefined,
+    [props.youtubeEnabled, story, language, hasVoices, apiKey, makeThumbnail, facts],
+  );
+
+  /* ---------------- Other languages ---------------- */
+
+  // Each language's lines, so switching back keeps its words and its recorded voices.
+  const [versions, setVersions] = useState<string[]>(() => [plan.language.trim() || "Original"]);
+  const savedTexts = useRef(new Map<string, Texts>());
+  const [translating, setTranslating] = useState(false);
+  const [translateError, setTranslateError] = useState<ErrorInfo | null>(null);
+
+  const translateTo = async (target: string) => {
+    const current = live.current.story;
+    setTranslating(true);
+    setTranslateError(null);
+    try {
+      const { texts } = await postJson(
+        "/api/translate",
+        { language: target, kind: "story", texts: storyTexts(current) },
+        TranslateResponseSchema,
+        { apiKey: live.current.apiKey || undefined, timeoutMs: 75_000 },
+      );
+      if (!aliveRef.current) return;
+      savedTexts.current.set(language, storyTexts(live.current.story));
+      savedTexts.current.set(target, texts);
+      changeStory((latest) => withStoryTexts(latest, texts));
+      // The voice list follows the language, so voices for it are offered (and given to speakers if needed).
+      setVoiceListState("loading");
+      setLanguage(target);
+      setVersions((names) => (names.includes(target) ? names : [...names, target]));
+    } catch (err) {
+      if (aliveRef.current) setTranslateError(toErrorInfo(err));
+    } finally {
+      if (aliveRef.current) setTranslating(false);
+    }
+  };
+
+  const switchTo = (name: string) => {
+    const texts = savedTexts.current.get(name);
+    if (!texts || name === language) return;
+    savedTexts.current.set(language, storyTexts(live.current.story));
+    playerRef.current?.pause();
+    changeStory((latest) => withStoryTexts(latest, texts));
+    setVoiceListState("loading");
+    setLanguage(name);
+  };
+
   const setClip = useCallback(
     (key: string, state: ClipState) => {
       if (!aliveRef.current) return;
@@ -508,11 +836,19 @@ export function StoryStep(props: Props) {
       const existing = live.current.clips[key];
       if (existing?.status === "ready") return existing.clip;
       const audio = getAudio();
-      const { voice, age, style } = lineVoice(current, line);
+      const { voice, age, style, delivery } = lineVoice(current, line);
       setClip(key, { status: "recording" });
       try {
-        const dataUrl = await requestSpeech(
-          { text: line.text.trim(), voice, age, ...(style ? { style } : {}) },
+        const spoken = live.current.language === "Original" ? "" : live.current.language;
+        const { audio: dataUrl, check } = await requestSpeech(
+          {
+            text: line.text.trim(),
+            voice,
+            age,
+            ...(style ? { style } : {}),
+            ...(delivery ? { delivery } : {}),
+            ...(spoken ? { language: spoken } : {}),
+          },
           {
             apiKey: live.current.apiKey || undefined,
             shouldStop: () => !aliveRef.current || stopVoicesRef.current,
@@ -521,7 +857,7 @@ export function StoryStep(props: Props) {
         // A real child's or older person's voice is left as it is; an adult voice is pitched to the age.
         const option = live.current.voiceList.voices.find((item) => item.id === voice);
         const clip = await audio.decode(dataUrl, ageRate(age, option));
-        setClip(key, { status: "ready", clip });
+        setClip(key, { status: "ready", clip, ...(check ? { check } : {}) });
         return clip;
       } catch (err) {
         setClip(key, { status: "failed", error: toErrorInfo(err) });
@@ -592,8 +928,8 @@ export function StoryStep(props: Props) {
         Your cartoon story
       </h1>
       <p className="mt-2 max-w-2xl text-lg text-muted">
-        Draw the pictures and record the voices, press play to watch, then edit, record and
-        download.
+        Press Make my video to draw, record, check and create the video in one go, or do each part
+        yourself below. Everything is checked automatically before it is ready to post.
       </p>
 
       <div className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,5fr)_minmax(0,6fr)] lg:items-start">
@@ -612,6 +948,25 @@ export function StoryStep(props: Props) {
             onSceneChange={setActiveIndex}
             onProgress={recording.handleProgress}
           />
+          <div className="rounded-2xl border border-brand/30 bg-brand-soft p-4">
+            <h2 className="font-display text-xl font-bold">Make my video</h2>
+            <p className="mt-1">
+              One press draws and checks every picture, records and checks every voice, and
+              creates the video file, ready to post.
+            </p>
+            <Button
+              variant="primary"
+              className="mt-3 w-full sm:w-auto"
+              loading={making !== null}
+              disabled={isRecording || pictureBatch !== null || voiceBatch !== null}
+              onClick={() => void makeVideo()}
+            >
+              {making ?? "Make my video"}
+            </Button>
+            <p aria-live="polite" className="sr-only">
+              {making ?? ""}
+            </p>
+          </div>
           <ExportPanel
             format={recording.format}
             state={recording.state}
@@ -620,6 +975,7 @@ export function StoryStep(props: Props) {
             scriptLabel="Story (.json)"
             live={recording.live}
             title={story.title}
+            youtube={youtube}
             caption={suggestCaption({
               title: story.title,
               health: story.scenes.some((scene) =>
@@ -650,6 +1006,14 @@ export function StoryStep(props: Props) {
         </div>
 
         <div className="min-w-0 space-y-6">
+          <QualityPanel
+            facts={facts}
+            factsOutOfDate={factsOutOfDate}
+            pictures={pictureSummary}
+            voices={voiceSummary}
+            onCheckFacts={() => void recheckFacts()}
+          />
+
           <VideoDetails
             title={story.title}
             aspectRatio={story.aspectRatio}
@@ -663,6 +1027,18 @@ export function StoryStep(props: Props) {
             onAspectRatioChange={(aspectRatio) =>
               changeStory((current) => ({ ...current, aspectRatio }))
             }
+          />
+
+          <LanguagePanel
+            current={language}
+            versions={versions}
+            busy={translating}
+            error={translateError}
+            disabled={isRecording || voiceBatch !== null}
+            hasVoices
+            onTranslate={translateTo}
+            onSwitch={switchTo}
+            onUseOwnKey={props.onUseOwnKey}
           />
 
           <StoryPictures
@@ -689,6 +1065,7 @@ export function StoryStep(props: Props) {
             onStoryChange={changeStory}
             onDrawCharacter={drawCharacter}
             onDrawPlace={drawPlace}
+            onDrawCard={drawCard}
             onDrawMissing={drawMissing}
             onStop={() => {
               stopPicturesRef.current = true;
@@ -714,6 +1091,7 @@ export function StoryStep(props: Props) {
             listeningTo={listeningTo}
             voiceList={voiceList}
             voiceListState={voiceListState}
+            language={language}
             onReloadVoices={loadVoices}
             onStoryChange={changeStory}
             onRecordMissing={recordMissing}

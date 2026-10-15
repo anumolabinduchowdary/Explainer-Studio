@@ -3,7 +3,15 @@
 import { useCallback, useState } from "react";
 import { postJson, toErrorInfo } from "@/lib/api";
 import type { ErrorInfo } from "@/lib/errors";
-import { PlanResponseSchema, type StoryPlan } from "@/lib/plan";
+import { checkFacts, textsKey, type FactsState } from "@/lib/checks";
+import { PlanResponseSchema, type StoryKind, type StoryPlan } from "@/lib/plan";
+import {
+  storyTexts,
+  storyboardTexts,
+  withStoryTexts,
+  withStoryboardTexts,
+  type Texts,
+} from "@/lib/translate";
 import { EMPTY_PROMPT } from "@/lib/prompt";
 import { SAMPLE, SAMPLE_STORY } from "@/lib/sample";
 import {
@@ -16,6 +24,12 @@ import {
 import { StoryResponseSchema, type Story } from "@/lib/story";
 import { DescribeStep, type BuildOptions } from "./DescribeStep";
 import { PlanStep } from "./PlanStep";
+import {
+  EMPTY_CHILD,
+  EMPTY_THERAPY,
+  type ChildDetails,
+  type TherapyDetails,
+} from "./StoryKindFields";
 import { PromptStep } from "./PromptStep";
 import { Stepper, type Step } from "./Stepper";
 import { StoryStep } from "./StoryStep";
@@ -28,6 +42,8 @@ type Props = {
   active: boolean;
   /** "Use my own key" mode: sent with each request, never stored. */
   apiKey: string;
+  /** Whether finished videos can be posted straight to YouTube. */
+  youtubeEnabled: boolean;
   onUseOwnKey: () => void;
 };
 
@@ -36,10 +52,16 @@ type Props = {
  * Prompt, Video. Cartoon stories go Describe, Plan, Video: the plan lists the
  * characters and places, so the story has exactly the cast the user asked for.
  */
-export default function Studio({ kind, active, apiKey, onUseOwnKey }: Props) {
+export default function Studio({ kind, active, apiKey, youtubeEnabled, onUseOwnKey }: Props) {
   const [step, setStep] = useState<Step>("describe");
   const [hasNavigated, setHasNavigated] = useState(false);
   const [description, setDescription] = useState("");
+  // The language chosen on the Describe step; empty means the language the description is written in.
+  const [language, setLanguage] = useState("");
+  // Cartoon stories: what kind (story, Social Story or home exercises) and its extra details.
+  const [storyKind, setStoryKind] = useState<StoryKind>("story");
+  const [child, setChild] = useState<ChildDetails>(EMPTY_CHILD);
+  const [therapy, setTherapy] = useState<TherapyDetails>(EMPTY_THERAPY);
   const [questions, setQuestions] = useState<string[]>([]);
   const [lastBuild, setLastBuild] = useState<BuildOptions | undefined>(undefined);
   const [prompt, setPrompt] = useState<FiveStepPrompt | null>(null);
@@ -49,6 +71,10 @@ export default function Studio({ kind, active, apiKey, onUseOwnKey }: Props) {
   // Bumped for every newly generated video, so step 3 starts fresh each time.
   const [generation, setGeneration] = useState(0);
   const [busy, setBusy] = useState<null | "prompt" | "result">(null);
+  // What the button says while a long step runs, e.g. "Checking the facts…".
+  const [busyLabel, setBusyLabel] = useState("");
+  // The automatic fact check of the newest script, handed to step 3.
+  const [facts, setFacts] = useState<FactsState>({ status: "none" });
   const [error, setError] = useState<ErrorInfo | null>(null);
 
   const hasResult = kind === "story" ? story !== null : storyboard !== null;
@@ -65,7 +91,14 @@ export default function Studio({ kind, active, apiKey, onUseOwnKey }: Props) {
     setBusy("prompt");
     setError(null);
     setLastBuild(options);
-    const request = { description, ...options };
+    const request = {
+      description,
+      ...(language.trim() ? { language: language.trim() } : {}),
+      ...(kind === "story" ? { kind: storyKind } : {}),
+      ...(kind === "story" && storyKind === "social" ? { child } : {}),
+      ...(kind === "story" && storyKind === "exercises" ? { therapy } : {}),
+      ...options,
+    };
     const sendOptions = { apiKey: apiKey || undefined };
     try {
       const result =
@@ -87,18 +120,44 @@ export default function Studio({ kind, active, apiKey, onUseOwnKey }: Props) {
     }
   };
 
+  /**
+   * Checks a new script's facts and wording and applies the fixes, so what
+   * reaches step 3 is ready to use. If the check cannot be done, the script
+   * is kept as written and step 3 offers to check again.
+   */
+  async function withFactCheck<T>(
+    value: T,
+    language: string,
+    read: (value: T) => Texts,
+    write: (value: T, texts: Texts) => T,
+  ): Promise<{ value: T; facts: FactsState }> {
+    setBusyLabel("Checking the facts…");
+    try {
+      const result = await checkFacts(kind, language, read(value), apiKey);
+      const fixed = write(value, result.texts);
+      return { value: fixed, facts: { status: "checked", result, texts: textsKey(read(fixed)) } };
+    } catch (err) {
+      return { value, facts: { status: "failed", message: toErrorInfo(err).message } };
+    }
+  }
+
   const generate = async () => {
     if (kind === "story" ? !plan : !prompt) return;
     setBusy("result");
+    setBusyLabel("");
     setError(null);
     const options = { apiKey: apiKey || undefined, timeoutMs: 75_000 };
     try {
-      if (kind === "story") {
+      if (kind === "story" && plan) {
         const result = await postJson("/api/story", { plan }, StoryResponseSchema, options);
-        setStory(result.story);
+        const checked = await withFactCheck(result.story, plan.language, storyTexts, withStoryTexts);
+        setStory(checked.value);
+        setFacts(checked.facts);
       } else {
         const result = await postJson("/api/storyboard", { prompt }, StoryboardResponseSchema, options);
-        setStoryboard(result.storyboard);
+        const checked = await withFactCheck(result.storyboard, language, storyboardTexts, withStoryboardTexts);
+        setStoryboard(checked.value);
+        setFacts(checked.facts);
       }
       setGeneration((n) => n + 1);
       goTo("video");
@@ -106,11 +165,13 @@ export default function Studio({ kind, active, apiKey, onUseOwnKey }: Props) {
       setError(toErrorInfo(err));
     } finally {
       setBusy(null);
+      setBusyLabel("");
     }
   };
 
   const loadSample = () => {
     setQuestions([]);
+    setFacts({ status: "none" });
     if (kind === "story") {
       setDescription(SAMPLE_STORY.description);
       setPlan(SAMPLE_STORY.plan);
@@ -158,6 +219,17 @@ export default function Studio({ kind, active, apiKey, onUseOwnKey }: Props) {
         <DescribeStep
           kind={kind}
           description={description}
+          language={language}
+          onLanguageChange={setLanguage}
+          storyKind={storyKind}
+          onStoryKindChange={(next) => {
+            setStoryKind(next);
+            if (questions.length > 0) setQuestions([]);
+          }}
+          child={child}
+          onChildChange={setChild}
+          therapy={therapy}
+          onTherapyChange={setTherapy}
           onDescriptionChange={(value) => {
             setDescription(value);
             // Earlier questions no longer match an edited description.
@@ -180,6 +252,7 @@ export default function Studio({ kind, active, apiKey, onUseOwnKey }: Props) {
           plan={plan}
           onChange={setPlan}
           busy={busy === "result"}
+          busyLabel={busyLabel}
           error={error}
           hasResult={hasResult}
           onBack={() => goTo("describe")}
@@ -193,6 +266,7 @@ export default function Studio({ kind, active, apiKey, onUseOwnKey }: Props) {
           prompt={prompt ?? EMPTY_PROMPT}
           onChange={setPrompt}
           busy={busy === "result"}
+          busyLabel={busyLabel}
           error={error}
           hasResult={hasResult}
           onBack={() => goTo("describe")}
@@ -207,9 +281,12 @@ export default function Studio({ kind, active, apiKey, onUseOwnKey }: Props) {
           <VideoStep
             key={generation}
             prompt={prompt ?? EMPTY_PROMPT}
+            language={language}
             storyboard={storyboard}
+            initialFacts={facts}
             active={showingVideo}
             apiKey={apiKey}
+            youtubeEnabled={youtubeEnabled}
             onStoryboardChange={updateStoryboard}
             onBackToPrompt={() => goTo("prompt")}
             onStartOver={startOver}
@@ -223,8 +300,10 @@ export default function Studio({ kind, active, apiKey, onUseOwnKey }: Props) {
             key={generation}
             plan={plan}
             story={story}
+            initialFacts={facts}
             active={showingVideo}
             apiKey={apiKey}
+            youtubeEnabled={youtubeEnabled}
             onStoryChange={updateStory}
             onBackToPlan={() => goTo("prompt")}
             onStartOver={startOver}

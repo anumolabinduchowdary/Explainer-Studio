@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { LANGUAGE_MAX } from "./languages";
 import { VISUAL_IDS } from "./visuals";
 
 export const ASPECT_RATIOS = ["9:16", "16:9", "1:1"] as const;
@@ -109,6 +110,10 @@ export const StoryboardWireSchema = z.object({
   title: z.string(),
   aspectRatio: z.enum(ASPECT_RATIOS),
   isHealthTopic: z.boolean(),
+  /** The language of the on-screen text, e.g. "Hindi". */
+  language: z.string(),
+  /** The health disclaimer in that language, for languages the app has no translation for. */
+  disclaimer: z.string(),
   scenes: z.array(SceneWireSchema),
 });
 export type StoryboardWire = z.infer<typeof StoryboardWireSchema>;
@@ -133,6 +138,8 @@ export const BuildPromptRequestSchema = z.object({
     .max(3)
     .optional(),
   skipQuestions: z.boolean().optional(),
+  /** The language the video should be in, when the person chose one. */
+  language: z.string().trim().max(LANGUAGE_MAX).optional(),
 });
 export type BuildPromptRequest = z.infer<typeof BuildPromptRequestSchema>;
 
