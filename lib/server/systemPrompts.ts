@@ -17,6 +17,12 @@ const MEDIUM = `The finished video is drawn by an app: each scene shows a short 
 
 const STORY_MEDIUM = `The finished video is a 2D cartoon drawn by an app. Each scene shows one background with up to five characters standing in it. The characters talk to each other in short spoken lines. Each line is spoken aloud by an AI voice and shown as large captions one or two words at a time. Characters stand and talk; they do not walk around, pick things up or change clothes, so everything important must be said in the dialogue.`;
 
+/**
+ * Whether the video is about special parenting decides if it ends with the
+ * Special Parenting QR card and mentions the account. Shared by both sections.
+ */
+const SPECIAL_PARENTING_RULE = `- specialParenting: true only if the video is about special parenting: raising, caring for, teaching or including children with disabilities, developmental differences or special needs (for example autism, cerebral palsy, Down syndrome, ADHD, learning disabilities, speech or language delay, hearing or vision impairment); therapy for them (physiotherapy, speech, occupational or behaviour therapy); inclusive schools and classrooms; early checks and signs of these conditions (such as baby hearing checks or developmental milestones); or support for their parents and caregivers. Otherwise false, including general parenting or child health that is not about special needs (such as healthy food or sleep), stories, festivals, mythology, history and general knowledge.`;
+
 const LANGUAGE_RULES = `Language and tone (always apply):
 - Be accurate. Only state facts that are well established. Do not invent statistics, names, phone numbers or organisations. If unsure, leave it out.
 - Be respectful and inclusive. Prefer person-first wording such as "children with cerebral palsy" or "a child who uses a wheelchair", unless the brief asks for wording a community prefers.
@@ -114,6 +120,7 @@ Storyboard rules:
 - language: the language of the on-screen text, as a name such as "English" or "Hindi".
 - If isHealthTopic is true, do not write the health disclaimer yourself: the app ends the last scene with "${HEALTH_DISCLAIMER}", translated first when the video is not in English.
 - disclaimer: if isHealthTopic is true and the language is not English, the sentence "${HEALTH_DISCLAIMER}" translated naturally into that language; otherwise an empty string.
+${SPECIAL_PARENTING_RULE}
 
 ${SCENE_RULES}
 
@@ -196,6 +203,7 @@ Other parts:
 - style: the drawing style the user asked for, in one sentence of plain words, for example "soft watercolour cartoon with pastel colours" or "bold comic-book cartoon with thick outlines". It is always a cartoon or illustration suitable for families, never a photograph or photorealistic. Never name an artist, studio, channel, brand or existing cartoon: describe the look instead. If the user did not ask for a particular look, return an empty string and the app's standard friendly 2D cartoon style is used.
 - Write the plan in plain, warm language, in the same language the user wrote in.
 - exercises: leave empty unless this is a home exercise programme.
+${SPECIAL_PARENTING_RULE}
 
 Clarifying questions:
 - If the description is too vague to tell what the video is about or who it is for, set status to "needs_clarification", ask up to 3 short, friendly questions (one sentence each) in "questions", and leave the other parts empty.

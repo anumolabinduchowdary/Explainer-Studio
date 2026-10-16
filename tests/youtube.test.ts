@@ -21,7 +21,7 @@ import {
   youtubeConfig,
   type YouTubeConfig,
 } from "@/lib/server/youtube";
-import { CHUNK_BYTES, YOUTUBE_LIMITS, sendVideo } from "@/lib/youtube";
+import { CHUNK_BYTES, DetailsRequestSchema, YOUTUBE_LIMITS, sendVideo } from "@/lib/youtube";
 
 const SECRET = "test-secret-0123456789-abcdefghijklmnopqrstuvwxyz";
 const ORIGIN = "https://studio.example.org";
@@ -256,6 +256,16 @@ describe("the title, description and tags", () => {
     expect(plain.description).not.toContain(HEALTH_DISCLAIMER);
     expect(plain.description).not.toContain("AI-generated");
     expect(plain).not.toHaveProperty("language");
+  });
+
+  it("asks viewers to follow the account only for videos that end with its QR card", () => {
+    const other = composeDetails(draft, { fallbackTitle: "x", health: false, aiVoices: true, follow: false });
+    expect(other.description).not.toContain(SOCIAL_HANDLE);
+    expect(other.description).toContain("The voices in this video are AI-generated.");
+    expect(composeDetails(draft, { fallbackTitle: "x", health: false, aiVoices: false, follow: true }).description).toContain(
+      `Follow ${SOCIAL_HANDLE} for more.`,
+    );
+    expect(DetailsRequestSchema.parse({ kind: "story", title: "t", script: "s", language: "", health: false, aiVoices: false }).follow).toBe(true);
   });
 
   it("writes the disclaimer in the video's language too", () => {

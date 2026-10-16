@@ -71,6 +71,8 @@ export type Scene = z.infer<typeof SceneSchema>;
 export const StoryboardSchema = z.object({
   title: z.string().trim().max(LIMITS.title),
   aspectRatio: z.enum(ASPECT_RATIOS),
+  /** About special parenting: the video ends with the Special Parenting QR card. Off when not known. */
+  specialParenting: z.boolean().optional(),
   scenes: z.array(SceneSchema).min(1).max(LIMITS.scenes),
 });
 export type Storyboard = z.infer<typeof StoryboardSchema>;
@@ -114,6 +116,8 @@ export const StoryboardWireSchema = z.object({
   language: z.string(),
   /** The health disclaimer in that language, for languages the app has no translation for. */
   disclaimer: z.string(),
+  /** Whether the video is about special parenting (it then ends with the Special Parenting QR card). */
+  specialParenting: z.boolean(),
   scenes: z.array(SceneWireSchema),
 });
 export type StoryboardWire = z.infer<typeof StoryboardWireSchema>;

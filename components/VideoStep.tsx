@@ -91,9 +91,9 @@ export function VideoStep(props: Props) {
   );
   const startOfScene = useCallback((index: number) => sceneStart(storyboard, index), [storyboard]);
 
-  // Every video closes with the Instagram QR card unless it is switched off.
+  // Videos about special parenting close with the Instagram QR card; it can be switched either way.
   const endCardImage = useEndCardImage();
-  const [endCardOn, setEndCardOn] = useState(true);
+  const [endCardOn, setEndCardOn] = useState(storyboard.specialParenting === true);
   const video = useMemo(
     () =>
       withEndCard(
@@ -214,11 +214,12 @@ export function VideoStep(props: Props) {
             health: storyboard.scenes.some((scene) => scene.body.includes(HEALTH_DISCLAIMER)),
             aiVoices: false,
             sources: facts.status === "checked" ? facts.result.sources : [],
+            follow: endCardOn,
             apiKey,
             makeThumbnail,
           }
         : undefined,
-    [props.youtubeEnabled, storyboard, storyboardText, language, apiKey, makeThumbnail, facts],
+    [props.youtubeEnabled, storyboard, storyboardText, language, apiKey, makeThumbnail, facts, endCardOn],
   );
 
   const regenerate = async (sceneId: string, instruction: string) => {
@@ -278,6 +279,7 @@ export function VideoStep(props: Props) {
               title: storyboard.title,
               health: storyboard.scenes.some((scene) => scene.body.includes(HEALTH_DISCLAIMER)),
               aiVoices: false,
+              follow: endCardOn,
             })}
             onRecord={recording.start}
             onCancel={recording.cancel}

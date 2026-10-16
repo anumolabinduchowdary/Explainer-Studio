@@ -99,6 +99,8 @@ export const StoryPlanSchema = z.object({
   calm: z.boolean().default(false),
   /** Home exercise programmes: the exercises, in order. */
   exercises: z.array(PlanExerciseSchema).max(MAX_EXERCISES).default([]),
+  /** About special parenting: the video ends with the Special Parenting QR card. */
+  specialParenting: z.boolean().default(false),
   /** What the video should teach or make people feel. */
   message: z
     .string()
@@ -151,6 +153,7 @@ export const PlanBuildWireSchema = z.object({
   exercises: z.array(
     z.object({ name: z.string(), steps: z.string(), dose: z.string(), look: z.string(), caution: z.string() }),
   ),
+  specialParenting: z.boolean(),
 });
 export type PlanBuildWire = z.infer<typeof PlanBuildWireSchema>;
 

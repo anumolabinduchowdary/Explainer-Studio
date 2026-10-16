@@ -26,6 +26,7 @@ const storyboard = (overrides: Partial<StoryboardWire> = {}): StoryboardWire => 
   isHealthTopic: false,
   language: "English",
   disclaimer: "",
+  specialParenting: false,
   scenes: [scene({ id: "s1" }), scene({ id: "s2" })],
   ...overrides,
 });
@@ -33,7 +34,12 @@ const storyboard = (overrides: Partial<StoryboardWire> = {}): StoryboardWire => 
 describe("normalizeStoryboard", () => {
   it("returns only the public storyboard fields", () => {
     const result = normalizeStoryboard(storyboard());
-    expect(Object.keys(result).sort()).toEqual(["aspectRatio", "scenes", "title"]);
+    expect(Object.keys(result).sort()).toEqual(["aspectRatio", "scenes", "specialParenting", "title"]);
+  });
+
+  it("keeps whether the video is about special parenting, which decides the QR card", () => {
+    expect(normalizeStoryboard(storyboard({ specialParenting: true })).specialParenting).toBe(true);
+    expect(normalizeStoryboard(storyboard()).specialParenting).toBe(false);
   });
 
   it("adds the disclaimer to the last scene of a health video", () => {

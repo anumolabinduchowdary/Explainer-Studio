@@ -86,6 +86,7 @@ export function normalizeStoryboard(wire: StoryboardWire): Storyboard {
   return StoryboardSchema.parse({
     title: wire.title.trim() || "Untitled video",
     aspectRatio: wire.aspectRatio,
+    specialParenting: wire.specialParenting,
     scenes,
   });
 }

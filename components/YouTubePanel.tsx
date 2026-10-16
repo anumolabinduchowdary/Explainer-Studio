@@ -118,6 +118,7 @@ export function YouTubePanel({ video, info }: { video: Blob; info: YouTubeInfo }
           health: info.health,
           aiVoices: info.aiVoices,
           sources: info.sources,
+          follow: info.follow,
         },
         DetailsResponseSchema,
         { apiKey: info.apiKey || undefined, timeoutMs: 75_000 },

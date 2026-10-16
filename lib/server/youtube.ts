@@ -324,6 +324,8 @@ export function composeDetails(
     languageName?: string;
     /** Trusted organisations to list under "Learn more". Only ones on the app's own list are kept. */
     sources?: ReadonlyArray<{ name: string; url: string }>;
+    /** Whether to ask viewers to follow the account: only for videos that end with its QR card. */
+    follow?: boolean;
   },
 ): VideoDetails {
   let title = clean(draft.title) || clean(facts.fallbackTitle) || "New video";
@@ -335,7 +337,7 @@ export function composeDetails(
   const fixed = [
     ...(facts.health ? disclaimerLines(facts.languageName ?? "") : []),
     facts.aiVoices ? "The voices in this video are AI-generated." : "",
-    `Follow ${SOCIAL_HANDLE} for more.`,
+    facts.follow === false ? "" : `Follow ${SOCIAL_HANDLE} for more.`,
   ].filter(Boolean);
   const points = draft.points.map(clean).filter(Boolean).slice(0, 5).map((point) => `• ${point}`);
   const trusted = (facts.sources ?? [])

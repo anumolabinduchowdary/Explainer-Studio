@@ -141,6 +141,13 @@ describe("suggested caption", () => {
     expect(suggestCaption({ title: "A story", health: true, aiVoices: false })).not.toContain("AI-generated");
   });
 
+  it("mentions the account only when the video ends with its QR card", () => {
+    const caption = suggestCaption({ title: "Ramayan in a minute", health: false, aiVoices: true, follow: false });
+    expect(caption).not.toContain(SOCIAL_HANDLE);
+    expect(caption).toContain("AI-generated");
+    expect(suggestCaption({ title: "CP explained", health: true, aiVoices: false, follow: true })).toContain(SOCIAL_HANDLE);
+  });
+
   it("still reads well without a title", () => {
     expect(suggestCaption({ title: "  ", health: false, aiVoices: false })).toMatch(/^A short explainer/);
   });

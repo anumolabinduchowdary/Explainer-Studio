@@ -46,6 +46,7 @@ export const POST = createPostHandler({
       language: languageCode(body.language),
       languageName: body.language,
       sources: body.sources,
+      follow: body.follow,
     });
     return { details };
   },

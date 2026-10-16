@@ -1,6 +1,7 @@
 {
   "title": "Understanding Cerebral Palsy",
   "aspectRatio": "9:16",
+  "specialParenting": true,
   "scenes": [
     {
       "id": "s1",

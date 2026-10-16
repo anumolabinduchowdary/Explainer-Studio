@@ -37,6 +37,8 @@ export const DetailsRequestSchema = z.object({
   aiVoices: z.boolean(),
   /** Trusted organisations chosen by the fact check, listed under "Learn more". */
   sources: z.array(SourceSchema).max(3).default([]),
+  /** Ask viewers to follow the account: only when the video ends with its QR card. */
+  follow: z.boolean().default(true),
 });
 export type DetailsRequest = z.infer<typeof DetailsRequestSchema>;
 
@@ -84,6 +86,8 @@ export type YouTubeInfo = {
   aiVoices: boolean;
   /** Trusted organisations from the fact check. */
   sources: Source[];
+  /** Whether the video ends with the Special Parenting QR card, so the description mentions the account. */
+  follow: boolean;
   /** "Use my own key" mode, for writing the description. */
   apiKey: string;
   /** A 1280×720 JPEG data URL for the thumbnail, or null if one cannot be made. */

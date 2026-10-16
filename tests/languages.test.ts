@@ -224,6 +224,7 @@ describe("the disclaimer in other languages", () => {
       isHealthTopic: true,
       language: "Marathi",
       disclaimer: "",
+      specialParenting: false,
       scenes: [{ id: "s1", durationSec: 6, heading: "शीर्षक", body: `मजकूर. ${HEALTH_DISCLAIMER}`, bullets: [], visual: "family" as const, transition: "fade" as const }],
     };
     const board = normalizeStoryboard(wire);

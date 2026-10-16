@@ -314,9 +314,9 @@ export function StoryStep(props: Props) {
     [story, timeLine],
   );
 
-  // Every video closes with the Instagram QR card unless it is switched off.
+  // Videos about special parenting close with the Instagram QR card; it can be switched either way.
   const endCardImage = useEndCardImage();
-  const [endCardOn, setEndCardOn] = useState(true);
+  const [endCardOn, setEndCardOn] = useState(plan.specialParenting);
   const video = useMemo(
     () =>
       withEndCard(
@@ -769,11 +769,12 @@ export function StoryStep(props: Props) {
             health: story.scenes.some((scene) => scene.lines.some((line) => line.text.includes(HEALTH_DISCLAIMER))),
             aiVoices: hasVoices,
             sources: facts.status === "checked" ? facts.result.sources : [],
+            follow: endCardOn,
             apiKey,
             makeThumbnail,
           }
         : undefined,
-    [props.youtubeEnabled, story, language, hasVoices, apiKey, makeThumbnail, facts],
+    [props.youtubeEnabled, story, language, hasVoices, apiKey, makeThumbnail, facts, endCardOn],
   );
 
   /* ---------------- Other languages ---------------- */
@@ -982,6 +983,7 @@ export function StoryStep(props: Props) {
                 scene.lines.some((line) => line.text.includes(HEALTH_DISCLAIMER)),
               ),
               aiVoices: hasVoices,
+              follow: endCardOn,
             })}
             notice={
               picturesWaiting

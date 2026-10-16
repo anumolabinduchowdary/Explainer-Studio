@@ -19,6 +19,7 @@ import { dimensionsFor } from "@/lib/renderer";
 import { buildStoryFromPlan, normalizePlanBuild } from "@/lib/server/normalizePlan";
 import {
   PLAN_INSTRUCTIONS,
+  STORYBOARD_INSTRUCTIONS,
   STORY_INSTRUCTIONS,
   planInput,
   planInstructions,
@@ -48,6 +49,7 @@ const physioWire = (changes: Partial<PlanBuildWire> = {}): PlanBuildWire => ({
   notes: "",
   style: "",
   exercises: [],
+  specialParenting: true,
   ...changes,
 });
 
@@ -361,6 +363,37 @@ describe("where characters stand", () => {
 });
 
 /* ------------------------------------------------------------------ */
+
+describe("the Special Parenting QR card", () => {
+  it("is decided from the description, and always on for Social Stories and exercise programmes", () => {
+    const ready = (result: ReturnType<typeof normalizePlanBuild>) => {
+      if (result.status !== "ready") throw new Error("expected a plan");
+      return result.plan;
+    };
+    expect(ready(normalizePlanBuild(physioWire(), { allowQuestions: false })).specialParenting).toBe(true);
+    // For example a Ramayan story: no QR card.
+    expect(ready(normalizePlanBuild(physioWire({ specialParenting: false }), { allowQuestions: false })).specialParenting).toBe(false);
+    expect(ready(normalizePlanBuild(physioWire({ specialParenting: false }), { allowQuestions: false, kind: "social" })).specialParenting).toBe(true);
+    const programme = physioWire({
+      specialParenting: false,
+      exercises: [{ name: "Bridge", steps: "Lie on your back and lift your hips.", dose: "10 times", look: "A boy on a mat", caution: "" }],
+    });
+    expect(ready(normalizePlanBuild(programme, { allowQuestions: false, kind: "exercises" })).specialParenting).toBe(true);
+
+    // A plan made before the question existed gets no QR card; the example (cerebral palsy) does.
+    expect(StoryPlanSchema.parse({ ...samplePlan, specialParenting: undefined }).specialParenting).toBe(false);
+    expect(StoryPlanSchema.parse(samplePlan).specialParenting).toBe(true);
+  });
+
+  it("asks both writers the same question, leaving out general topics and stories", () => {
+    for (const instructions of [PLAN_INSTRUCTIONS, STORYBOARD_INSTRUCTIONS]) {
+      expect(instructions).toContain("specialParenting: true only if the video is about special parenting");
+      expect(instructions).toContain("autism, cerebral palsy");
+      expect(instructions).toContain("not about special needs");
+      expect(instructions).toContain("mythology");
+    }
+  });
+});
 
 describe("Social Stories and home exercise programmes", () => {
   it("makes a Social Story calm, and keeps exercises out of it", () => {

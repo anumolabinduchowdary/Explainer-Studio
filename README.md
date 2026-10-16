@@ -413,9 +413,22 @@ carries on.
 
 ## The closing card
 
-Every video, in both sections, ends with a 4-second closing card showing the Special
-Parenting Instagram QR code. It is on by default; untick **End with our Instagram QR code**
-on the video screen to leave it off for one video.
+Videos about special parenting, in both sections, end with a 4-second closing card showing
+the Special Parenting Instagram QR code. Other videos (a Ramayan story, a festival, general
+knowledge) end without it.
+
+- **How it is decided.** While planning a cartoon story or writing an explainer storyboard,
+  the AI also answers whether the video is about special parenting: children with
+  disabilities, developmental differences or special needs; their therapy; inclusive
+  schools; early checks such as baby hearing tests; or support for their parents and
+  caregivers. General parenting or child health that is not about special needs does not
+  count. Social Stories and home exercise programmes always count. The answer costs nothing
+  extra: it comes back with the plan or storyboard.
+- **Changing it.** The **End with our Instagram QR code** box on the video screen starts
+  ticked or unticked from that answer; tick or untick it for any video.
+- **The account line goes with it.** "Follow @specialparenting for more." is added to the
+  suggested share caption and the YouTube description only when the video ends with the QR
+  card.
 
 To use a different picture, replace `public/end-card.webp` (any image works). The length and
 the screen-reader description are set in `lib/endCard.ts`.

@@ -99,6 +99,8 @@ export function normalizePlanBuild(
     kind,
     // Social Stories are always calm; the person can switch it on for any story on the plan.
     calm: kind === "social",
+    // Social Stories and home exercise programmes are special parenting by definition.
+    specialParenting: kind !== "story" || wire.specialParenting,
     exercises,
     message: clip(wire.message, PLAN_LIMITS.message),
     // Characters and places keep the order the model listed them in; nothing is merged.
