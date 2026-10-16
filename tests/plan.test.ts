@@ -26,8 +26,8 @@ import {
   storyInput,
   storyInstructions,
 } from "@/lib/server/systemPrompts";
-import { DEFAULT_ART_STYLE, NARRATOR, STORY_LIMITS, StorySchema } from "@/lib/story";
-import { arrangeStage } from "@/lib/storyRenderer";
+import { DEFAULT_ART_STYLE, NARRATOR, STORY_LIMITS, StorySchema, storySceneStart, type Story } from "@/lib/story";
+import { arrangeStage, drawStoryFrame, storyCharacterScale, type CharacterSprites } from "@/lib/storyRenderer";
 
 /** What the planner should return for "4 children in a physiotherapy centre with a physiotherapist". */
 const physioWire = (changes: Partial<PlanBuildWire> = {}): PlanBuildWire => ({
@@ -307,6 +307,81 @@ describe("story from a plan", () => {
 });
 
 /* ------------------------------------------------------------------ */
+
+describe("characters keep one size for the whole story", () => {
+  // A Ramayan-like cast: five adults, one of them (Hanuman, with his tail) drawn wider.
+  const cast = ["Rama", "Sita", "Lakshmana", "Hanuman", "Ravana"];
+  const story = (aspectRatio: "9:16" | "16:9" | "1:1", withCard = false): Story =>
+    StorySchema.parse({
+      title: "Ramayan",
+      aspectRatio,
+      artStyle: DEFAULT_ART_STYLE,
+      narratorVoice: "sage",
+      characters: cast.map((name, i) => ({
+        id: `c${i + 1}`, name, look: name, size: "large", voice: "cedar", voiceAge: "adult", voiceStyle: "",
+      })),
+      locations: [{ id: "l1", name: "Forest", look: "A forest" }],
+      scenes: [
+        { id: "s1", locationId: "l1", onStage: ["c1", "c2"], lines: [{ speaker: "c1", text: "We live in the forest." }] },
+        { id: "s2", locationId: "l1", onStage: ["c1", "c2", "c3", "c4", "c5"], lines: [{ speaker: "c4", text: "I found her!" }] },
+        { id: "s3", locationId: "l1", onStage: ["c1"], lines: [{ speaker: "c1", text: "We are home." }], ...(withCard ? { card: { title: "Bridge", dose: "10 times", look: "A mat" } } : {}) },
+      ],
+    });
+  const sprites = new Map<string, CharacterSprites>(
+    cast.map((name, i) => [`c${i + 1}`, { idle: { source: { name } as unknown as CanvasImageSource, width: name === "Hanuman" ? 700 : 450, height: 1000 } }]),
+  );
+  /** Draws a still of each scene and returns how tall each character was drawn in it. */
+  const drawnHeights = (subject: Story) => {
+    const heights: Array<Map<string, number>> = [];
+    let current = new Map<string, number>();
+    const ctx = new Proxy({} as Record<string | symbol, unknown>, {
+      get: (target, key) => {
+        if (key in target) return target[key];
+        if (key === "drawImage") return (source: { name?: string }, ...box: number[]) => source?.name && current.set(source.name, box[3]);
+        if (key === "createLinearGradient" || key === "createRadialGradient") return () => ({ addColorStop: () => undefined });
+        if (key === "measureText") return (text: string) => ({ width: text.length * 10 });
+        return () => undefined;
+      },
+      set: (target, key, value) => {
+        target[key] = value;
+        return true;
+      },
+    }) as unknown as CanvasRenderingContext2D;
+    subject.scenes.forEach((_, index) => {
+      current = new Map();
+      drawStoryFrame(ctx, subject, storySceneStart(subject, index) + 0.3, { characters: sprites, places: new Map(), headingFont: "sans-serif" }, { settled: true });
+      heights.push(current);
+    });
+    return heights;
+  };
+
+  it("draws everyone at the same size in a scene with two, with five and alone", () => {
+    for (const ratio of ["9:16", "16:9", "1:1"] as const) {
+      const [two, five, alone] = drawnHeights(story(ratio));
+      expect(five.size).toBe(5);
+      for (const name of ["Rama", "Sita"]) {
+        expect(two.get(name)).toBeCloseTo(five.get(name)!, 6);
+      }
+      expect(alone.get("Rama")).toBeCloseTo(five.get("Rama")!, 6);
+      // Everyone in the crowded scene, front row and back row, is the same height.
+      expect(new Set([...five.values()].map((h) => h.toFixed(3))).size).toBe(1);
+    }
+  });
+
+  it("shrinks the whole story only as much as its most crowded scene needs, never below 65%", () => {
+    const tall = dimensionsFor("9:16");
+    const scale = storyCharacterScale(story("9:16"), sprites, tall);
+    expect(scale).toBeLessThan(1);
+    expect(scale).toBeGreaterThanOrEqual(0.65);
+    // Without the crowded scene there is room for everyone at full size.
+    const small = { ...story("9:16"), scenes: story("9:16").scenes.filter((scene) => scene.id !== "s2") };
+    expect(storyCharacterScale(small, sprites, tall)).toBe(1);
+    // An exercise card in any scene makes everyone smaller in every scene, not only there.
+    expect(storyCharacterScale({ ...small, scenes: story("9:16", true).scenes.filter((scene) => scene.id !== "s2") }, sprites, tall)).toBe(0.72);
+    const [two, alone] = drawnHeights({ ...small, scenes: story("9:16", true).scenes.filter((scene) => scene.id !== "s2") });
+    expect(two.get("Rama")).toBeCloseTo(alone.get("Rama")!, 6);
+  });
+});
 
 describe("where characters stand", () => {
   const tall = dimensionsFor("9:16");

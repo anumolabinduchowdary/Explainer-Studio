@@ -625,23 +625,30 @@ export function StoryStep(props: Props) {
   /* ---------------- Quality ---------------- */
 
   const [facts, setFacts] = useState<FactsState>(props.initialFacts);
+  // Each language version keeps its own check, so switching back does not need checking again.
+  const factsByLanguage = useRef(new Map<string, FactsState>());
   const currentTexts = useMemo(() => textsKey(storyTexts(story)), [story]);
   const factsOutOfDate = facts.status === "checked" && facts.texts !== currentTexts;
 
-  /** Checks the words again (for example after edits) and applies any fixes. */
-  const recheckFacts = async () => {
+  /**
+   * Checks the words of one language version and applies any fixes. A check
+   * that finishes after the person has switched to another language is
+   * dropped, so fixes never land in the wrong language.
+   */
+  const checkWords = async (base: Story, lang: string) => {
     setFacts({ status: "checking" });
-    const current = live.current.story;
     try {
-      const result = await checkFacts("story", language === "Original" ? "" : language, storyTexts(current), apiKey);
-      if (!aliveRef.current) return;
-      const fixed = withStoryTexts(current, result.texts);
+      const result = await checkFacts("story", lang === "Original" ? "" : lang, storyTexts(base), apiKey);
+      if (!aliveRef.current || live.current.language !== lang) return;
+      const fixed = withStoryTexts(base, result.texts);
       if (Object.keys(result.texts).length) changeStory((latest) => withStoryTexts(latest, result.texts));
       setFacts({ status: "checked", result, texts: textsKey(storyTexts(fixed)) });
     } catch (err) {
-      if (aliveRef.current) setFacts({ status: "failed", message: toErrorInfo(err).message });
+      if (aliveRef.current && live.current.language === lang) setFacts({ status: "failed", message: toErrorInfo(err).message });
     }
   };
+  /** Checks the words again, for example after edits. */
+  const recheckFacts = () => checkWords(live.current.story, language);
 
   const pictureSummary = useMemo<PictureSummary>(() => {
     const main = [
@@ -799,11 +806,16 @@ export function StoryStep(props: Props) {
       if (!aliveRef.current) return;
       savedTexts.current.set(language, storyTexts(live.current.story));
       savedTexts.current.set(target, texts);
+      factsByLanguage.current.set(language, facts);
+      const translated = withStoryTexts(live.current.story, texts);
       changeStory((latest) => withStoryTexts(latest, texts));
       // The voice list follows the language, so voices for it are offered (and given to speakers if needed).
       setVoiceListState("loading");
       setLanguage(target);
+      live.current.language = target;
       setVersions((names) => (names.includes(target) ? names : [...names, target]));
+      // The new words are checked straight away, so the translated video can be ready to post without a press.
+      void checkWords(translated, target);
     } catch (err) {
       if (aliveRef.current) setTranslateError(toErrorInfo(err));
     } finally {
@@ -815,10 +827,16 @@ export function StoryStep(props: Props) {
     const texts = savedTexts.current.get(name);
     if (!texts || name === language) return;
     savedTexts.current.set(language, storyTexts(live.current.story));
+    factsByLanguage.current.set(language, facts);
     playerRef.current?.pause();
     changeStory((latest) => withStoryTexts(latest, texts));
     setVoiceListState("loading");
     setLanguage(name);
+    live.current.language = name;
+    // A version checked before keeps its result; one that never was is checked now.
+    const known = factsByLanguage.current.get(name);
+    if (known && known.status === "checked") setFacts(known);
+    else void checkWords(withStoryTexts(live.current.story, texts), name);
   };
 
   const setClip = useCallback(

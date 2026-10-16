@@ -128,10 +128,20 @@ export function VideoStep(props: Props) {
     [onStoryboardChange, invalidate],
   );
 
+  /* ---------------- Quality: the words' fact check ---------------- */
+
+  const [facts, setFacts] = useState<FactsState>(props.initialFacts);
+  // Each language version keeps its own check, so switching back does not need checking again.
+  const factsByLanguage = useRef(new Map<string, FactsState>());
+  const currentTexts = useMemo(() => textsKey(storyboardTexts(storyboard)), [storyboard]);
+  const factsOutOfDate = facts.status === "checked" && facts.texts !== currentTexts;
+
   /* ---------------- Other languages ---------------- */
 
   // Each language's words, so switching back does not need translating again.
   const [language, setLanguage] = useState(() => props.language.trim() || "Original");
+  // The language showing right now, for checks that finish later.
+  const languageRef = useRef(language);
   const [versions, setVersions] = useState<string[]>(() => [props.language.trim() || "Original"]);
   const saved = useRef(new Map<string, Texts>());
   const [translating, setTranslating] = useState(false);
@@ -149,9 +159,13 @@ export function VideoStep(props: Props) {
       );
       saved.current.set(language, storyboardTexts(storyboard));
       saved.current.set(target, texts);
+      factsByLanguage.current.set(language, facts);
       changeStoryboard((current) => withStoryboardTexts(current, texts));
       setLanguage(target);
+      languageRef.current = target;
       setVersions((names) => (names.includes(target) ? names : [...names, target]));
+      // The new words are checked straight away, so the translated video can be ready to post without a press.
+      void checkWords(withStoryboardTexts(storyboard, texts), target);
     } catch (err) {
       setTranslateError(toErrorInfo(err));
     } finally {
@@ -164,28 +178,37 @@ export function VideoStep(props: Props) {
     if (!texts || name === language) return;
     // Edits made in this language are kept for when it is shown again.
     saved.current.set(language, storyboardTexts(storyboard));
+    factsByLanguage.current.set(language, facts);
     changeStoryboard((current) => withStoryboardTexts(current, texts));
     setLanguage(name);
+    languageRef.current = name;
+    // A version checked before keeps its result; one that never was is checked now.
+    const known = factsByLanguage.current.get(name);
+    if (known && known.status === "checked") setFacts(known);
+    else void checkWords(withStoryboardTexts(storyboard, texts), name);
   };
 
   /* ---------------- Quality ---------------- */
 
-  const [facts, setFacts] = useState<FactsState>(props.initialFacts);
-  const currentTexts = useMemo(() => textsKey(storyboardTexts(storyboard)), [storyboard]);
-  const factsOutOfDate = facts.status === "checked" && facts.texts !== currentTexts;
-
-  /** Checks the words again (for example after edits) and applies any fixes. */
-  const recheckFacts = async () => {
+  /**
+   * Checks the words of one language version and applies any fixes. A check
+   * that finishes after the person has switched to another language is
+   * dropped, so fixes never land in the wrong language.
+   */
+  async function checkWords(base: Storyboard, lang: string) {
     setFacts({ status: "checking" });
     try {
-      const result = await checkFacts("explainer", language === "Original" ? "" : language, storyboardTexts(storyboard), apiKey);
-      const fixed = withStoryboardTexts(storyboard, result.texts);
+      const result = await checkFacts("explainer", lang === "Original" ? "" : lang, storyboardTexts(base), apiKey);
+      if (languageRef.current !== lang) return;
+      const fixed = withStoryboardTexts(base, result.texts);
       if (Object.keys(result.texts).length) changeStoryboard((current) => withStoryboardTexts(current, result.texts));
       setFacts({ status: "checked", result, texts: textsKey(storyboardTexts(fixed)) });
     } catch (err) {
-      setFacts({ status: "failed", message: toErrorInfo(err).message });
+      if (languageRef.current === lang) setFacts({ status: "failed", message: toErrorInfo(err).message });
     }
-  };
+  }
+  /** Checks the words again, for example after edits. */
+  const recheckFacts = () => checkWords(storyboard, language);
 
   /* ---------------- YouTube ---------------- */
 

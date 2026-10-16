@@ -93,7 +93,10 @@ the download with the built-in example.
 
 A cartoon story is a short conversation between up to six characters, in up to three places.
 Up to five characters can be on screen together; a group that is too wide for the frame
-stands in two rows, taller people at the back.
+stands in two rows, taller people at the back. Each character keeps exactly the same size
+in every scene and in both rows: the story is sized once, so that its most crowded scene
+fits (neighbours may overlap a little, and nobody is made smaller than 65%), instead of
+shrinking people scene by scene (`storyCharacterScale` in `lib/storyRenderer.ts`).
 
 1. **Describe** who is in the story, where it happens and what it should teach, for example
    "4 children in a physiotherapy centre with their physiotherapist".
@@ -602,8 +605,9 @@ what was checked and fixed. When everything passes it says **Ready to post**.
   viewers can learn more, only from a fixed list of trusted bodies in `lib/quality.ts` (WHO,
   UNICEF, the Indian Academy of Pediatrics, the Ministry of Health and Family Welfare,
   NIMHANS, the Rehabilitation Council of India and others), so it can never invent a source or
-  a link. These go under "Learn more" in the YouTube description. After you edit the words,
-  the panel offers **Check again**.
+  a link. These go under "Learn more" in the YouTube description. A new language version is
+  checked by itself as soon as it is translated, and each version keeps its own result when
+  you switch between them. After you edit the words, the panel offers **Check again**.
 - **Pictures** (cartoon stories): each character's standing pose, each background and each
   exercise picture is shown to the AI with its description. If something important is wrong (for example a
   wheelchair without wheels, the wrong age, text in the picture), it is redrawn with the

@@ -137,6 +137,57 @@ const STEP_BACK: Record<number, number[]> = { 4: [0, 3, 1, 2], 5: [1, 3, 0, 2, 4
 const SIZE_RANK: Record<StoryCharacter["size"], number> = { small: 0, medium: 1, large: 2 };
 /** A typical character is a little under half as wide as they are tall. */
 const TYPICAL_ASPECT = 0.45;
+/** How wide a character without a picture yet is drawn, for its height. */
+const PLACEHOLDER_ASPECT = 0.42;
+
+/** With an exercise card at the top, the characters stand smaller below it. */
+const CARD_SCALE = 0.72;
+/**
+ * Neighbours in a group may overlap a little (a picture's box is wider than
+ * the body, with arms and props), so a crowded scene does not shrink
+ * everyone more than it needs to.
+ */
+const GROUP_OVERLAP = 1.25;
+/** Characters are never made smaller than this to fit a crowded scene; they stand closer instead. */
+const MIN_STORY_SCALE = 0.65;
+
+const aspectOf = (sprites: CharacterSprites | undefined) =>
+  sprites ? sprites.idle.width / sprites.idle.height : PLACEHOLDER_ASPECT;
+
+/**
+ * One size for the whole story. Every character keeps exactly the same size
+ * in every scene and in both rows, however many people share the stage: the
+ * story is scaled once, so that its most crowded scene still fits (and the
+ * exercise card, if any scene has one). Earlier versions shrank characters
+ * scene by scene, so the same person changed size from one scene to the next.
+ */
+export function storyCharacterScale(
+  story: Story,
+  characters: StoryRenderAssets["characters"],
+  dims: Dimensions,
+): number {
+  const { width: W, height: H } = dims;
+  const { heights } = layoutFor(dims);
+  let scale = story.scenes.some((scene) => scene.card) ? CARD_SCALE : 1;
+  for (const scene of story.scenes) {
+    const cast = sceneCast(story, scene);
+    const places = arrangeStage(cast, dims);
+    cast.forEach((character, i) => {
+      const width = H * heights[character.size] * aspectOf(characters.get(character.id));
+      const room = W * places[i].maxWidth * GROUP_OVERLAP;
+      if (width * scale > room) scale = room / width;
+    });
+  }
+  return Math.max(MIN_STORY_SCALE, scale);
+}
+
+/** The characters on screen in a scene, in the scene's order. */
+function sceneCast(story: Story, scene: Story["scenes"][number]): StoryCharacter[] {
+  return scene.onStage
+    .map((id) => story.characters.find((character) => character.id === id))
+    .filter((character): character is StoryCharacter => Boolean(character))
+    .slice(0, STORY_LIMITS.onStage);
+}
 
 export type StagePlace = {
   /** Centre of the character, as a fraction of the width. */
@@ -504,14 +555,11 @@ export function drawStoryFrame(
   const motion = calm ? 0.4 : 1;
   const zoom = settled ? 1.05 : 1.03 + 0.012 * motion * Math.min(moment.sceneLocal, 6);
   drawBackdrop(ctx, assets.places.get(scene.locationId), dims, layout.floor, zoom);
-  // With an exercise card at the top, the characters stand a little smaller below it.
-  const cardScale = scene.card ? 0.72 : 1;
+  // Every character is drawn at one size for the whole story (see storyCharacterScale).
+  const storyScale = storyCharacterScale(story, assets.characters, dims);
 
   /* Characters: each keeps its place on screen (slot i) whatever the painting order. */
-  const cast = scene.onStage
-    .map((id) => story.characters.find((character) => character.id === id))
-    .filter((character): character is StoryCharacter => Boolean(character))
-    .slice(0, STORY_LIMITS.onStage);
+  const cast = sceneCast(story, scene);
   const places = arrangeStage(cast, dims);
   const arrive = settled ? 1 : easeOutCubic(clamp01(moment.sceneLocal / (SCENE_LEAD_SEC * 0.9)));
 
@@ -528,19 +576,13 @@ export function drawStoryFrame(
   paintOrder.forEach(({ character, i }) => {
     const sprites = assets.characters.get(character.id);
     const isSpeaker = character.id === speakerId;
-    const aspect = sprites ? sprites.idle.width / sprites.idle.height : 0.42;
 
     const place = places[i];
     const atBack = place.row === "back";
+    // The back row stands a step higher, at the same size, so nobody changes size between scenes.
     const floor = layout.floor - (atBack ? layout.rowLift : 0);
-    const maxWidth = W * place.maxWidth;
-    // People further away look a touch smaller.
-    let h = H * layout.heights[character.size] * (atBack ? 0.95 : 1) * cardScale;
-    let w = h * aspect;
-    if (w > maxWidth) {
-      h *= maxWidth / w;
-      w = maxWidth;
-    }
+    const h = H * layout.heights[character.size] * storyScale;
+    const w = h * aspectOf(sprites);
 
     const x = W * place.x;
     const facing = place.x > 0.5 ? -1 : 1; // pictures are drawn facing right
