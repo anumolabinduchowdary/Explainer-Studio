@@ -11,7 +11,7 @@ import { StoryFromPlanWireSchema } from "@/lib/plan";
 import { normalizeStory } from "@/lib/server/normalizeStory";
 import type { OpenAIClient } from "@/lib/server/openai";
 import { resetRateLimits } from "@/lib/server/rateLimit";
-import { generateSpeech, speechInstructions } from "@/lib/server/speech";
+import { INDIAN_ENGLISH_ACCENT, accentDirection, generateSpeech, speechInstructions } from "@/lib/server/speech";
 import {
   DEFAULT_ART_STYLE,
   ImageRequestSchema,
@@ -433,6 +433,39 @@ describe("voices", () => {
     expect(speechInstructions("calm", "adult")).not.toMatch(/child|elderly|teenager/);
     expect(SpeechRequestSchema.safeParse({ text: "Hi", voice: "sage", age: "child" }).success).toBe(true);
     expect(SpeechRequestSchema.safeParse({ text: "Hi", voice: "sage", age: "baby" }).success).toBe(false);
+  });
+
+  it("asks for an Indian accent in every language", () => {
+    // English, named or not, is spoken with an Indian English accent, never an American one.
+    expect(accentDirection("English", "Hanuman leaps across the sea.")).toBe(INDIAN_ENGLISH_ACCENT);
+    expect(accentDirection("", "Hello, Priya!")).toBe(INDIAN_ENGLISH_ACCENT);
+    expect(accentDirection(undefined, "Good morning, team!")).toBe(INDIAN_ENGLISH_ACCENT);
+    expect(INDIAN_ENGLISH_ACCENT).toContain("Indian English accent");
+    expect(INDIAN_ENGLISH_ACCENT).toContain("Never an American or British accent");
+    // Indian languages, by name or by the script the line is written in.
+    expect(accentDirection("Hindi", "राम वन में रहते हैं।")).toContain("native speaker of Hindi from India");
+    expect(accentDirection("Tamil", "வணக்கம்")).toContain("native speaker of Tamil from India");
+    expect(accentDirection("", "నమస్కారం")).toContain("from India");
+    expect(accentDirection("Hinglish", "Chalo, let's go!")).toContain("native speaker of Hinglish from India");
+    // Any other language is also spoken with an Indian accent.
+    const french = accentDirection("French", "Bonjour tout le monde");
+    expect(french).toContain("Indian accent");
+    expect(french).toContain("Speak French the way a fluent speaker from India would");
+    expect(accentDirection("Arabic", "مرحبا")).toContain("Indian accent");
+    // Every direction asks for India, whatever the language.
+    for (const [language, text] of [["English", "Hi"], ["Hindi", "नमस्ते"], ["Spanish", "Hola"], ["", "こんにちは"]]) {
+      expect(accentDirection(language, text)).toMatch(/India/);
+    }
+  });
+
+  it("puts the accent into the voice's instructions", async () => {
+    const { client, create } = fakeSpeech();
+    await generateSpeech(client, { text: "Sita, we will bring you home.", voice: "cedar", language: "English" });
+    expect(firstCall(create).instructions).toContain(INDIAN_ENGLISH_ACCENT);
+    await generateSpeech(client, { text: "सीता, हम तुम्हें घर ले चलेंगे।", voice: "cedar", language: "Hindi" });
+    const hindi = create.mock.calls[1] as unknown as [{ instructions: string }];
+    expect(hindi[0].instructions).toContain("native speaker of Hindi from India");
+    expect(hindi[0].instructions).not.toContain("Indian English accent");
   });
 
   it("uses real clip lengths for timing once they exist", () => {

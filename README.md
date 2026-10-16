@@ -153,7 +153,15 @@ Things to know:
   "gently reassuring"), which you can change in the scene editor under **How it is said**. A
   line written as a question is answered a little sooner, as in real conversation. OpenAI
   names `marin` and `cedar` as its most natural voices, so the writer gives them to the
-  characters who speak most.
+  characters who speak most, then `coral`, `sage`, `ash`, `verse` and `ballad`; the older,
+  flatter voices are used only when those are taken.
+- **Indian accent in every language.** OpenAI's voices sound American unless told otherwise,
+  so every line is asked for an Indian accent (`accentDirection` in `lib/server/speech.ts`):
+  English as natural Indian English, with Indian names and words said the Indian way; Hindi,
+  Telugu and the other Indian languages as a native speaker from India; and any other language
+  the way a fluent speaker from India would say it. The accent is acted by
+  the voice, so it is close but not perfect; [SpeechGen voices](#speechgen-voices) use real
+  Indian voices instead.
 - **Children and older people.** With [SpeechGen voices](#speechgen-voices) switched on,
   English stories use real children's and older voices. OpenAI's 13 voices are all adults. The **Age** setting
   (Child, Teenager, Adult, Older person) gets closer in two ways at once: the voice is asked

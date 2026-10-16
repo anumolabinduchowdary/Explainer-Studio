@@ -281,11 +281,11 @@ The cast and the places are fixed:
 
 What you write:
 - title: a short title, at most 8 words.
-- narratorVoice: the voice for narrator lines, from the voice list below. Pick one no character uses.
+- narratorVoice: the voice for narrator lines, from the voice list below. Pick one no character uses, from the most natural voices (see below) when one is free.
 - voices: one entry for every character in the plan, with its characterId.
   - voice: all the voices are adults, so choose by gender and personality, and give each character a different voice (name: how it tends to sound):
 ${VOICES.map((voice) => `    ${voice.id}: ${voice.hint}`).join("\n")}
-    For a girl or a woman choose a female voice; for a boy or a man choose a male voice. marin and cedar sound the most natural: give them to the characters who speak most.
+    For a girl or a woman choose a female voice; for a boy or a man choose a male voice. marin and cedar sound the most natural: give them to the characters who speak most. Next choose from coral, sage, ash, verse and ballad, which are also natural and expressive. Use nova, shimmer, echo, fable, onyx and alloy only when those are all taken: they sound flatter.
   - voiceStyle: a few words on the character's manner of speaking, for example "cheerful, quick and proud" or "calm and reassuring". Do not repeat the age here.
 - isHealthTopic: true if the video is about health, disability, medicine, child development, mental health or nutrition; otherwise false.
 - If isHealthTopic is true, do not write the health disclaimer as a line: the app ends the story with "${HEALTH_DISCLAIMER}", said by "${NARRATOR}" and translated first when the plan's language is not English.
