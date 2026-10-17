@@ -93,7 +93,8 @@ export function StoryVoices(props: Props) {
       <p className="mt-0.5 text-muted">
         An AI voice speaks each line, and the speaker&apos;s mouth follows the sound. The voices
         are computer-generated, not real people: please say so wherever you share the video. Each
-        line is charged to the {provider === "sarvam" ? "Sarvam AI" : provider === "speechgen" ? "SpeechGen" : "OpenAI"}{" "}
+        line is charged to the{" "}
+        {provider === "gemini" ? "Google Gemini" : provider === "sarvam" ? "Sarvam AI" : provider === "speechgen" ? "SpeechGen" : "OpenAI"}{" "}
         account in use.
       </p>
       <p className="mt-1 text-muted">

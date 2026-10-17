@@ -118,6 +118,8 @@ type RequestOptions = {
   onWaiting?: (seconds: number) => void;
   /** Lets the caller stop a queued retry (for example when leaving the page). */
   shouldStop?: () => boolean;
+  /** How many times to try in all while the service says it is busy. */
+  attempts?: number;
 };
 
 /**
@@ -132,7 +134,7 @@ async function retryWhenBusy<T>(run: () => Promise<T>, options: RequestOptions):
       const info = toErrorInfo(err);
       const busy =
         info.code === "rate_limited" || info.code === "upstream_busy" || info.code === "voice_busy";
-      if (!busy || attempt >= 3 || options.shouldStop?.()) throw err;
+      if (!busy || attempt >= (options.attempts ?? 3) || options.shouldStop?.()) throw err;
       const wait = Math.min(65, Math.max(5, info.retryAfterSec ?? 20));
       options.onWaiting?.(wait);
       await sleep(wait * 1000);
@@ -169,6 +171,7 @@ export function requestSpeech(
         // Listening back, and sometimes recording again, takes longer than recording once.
         timeoutMs: 90_000,
       }),
-    options,
+    // Voice services can allow only a few lines a minute (Gemini's free plan: 3), so wait it out longer.
+    { attempts: 6, ...options },
   );
 }

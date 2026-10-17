@@ -42,10 +42,80 @@ export const SARVAM_VOICE_OPTIONS: VoiceOption[] = [
   ...MALE.map((id) => ({ id, label: label(id, "male"), gender: "male" as const, age: "adult" as const })),
 ];
 
-const SARVAM_IDS = new Set<string>([...MALE, ...FEMALE]);
+/**
+ * Sarvam's newer voices (Bulbul v4 Flash), each recorded for one language in
+ * one speaking style. Only conversational and storytelling styles are listed
+ * (not ads, banking and so on), and only names whose gender is clear. They
+ * are offered in the Voices menu after the general voices, but not given out
+ * by themselves: in a Telugu listening test the conversational ones (Kavitha,
+ * Pooja) sounded halting. Only voices that passed a listening test (see
+ * LISTENED) are given out first.
+ * The id is "<name>_<language>_<style>"; the name is the person, so
+ * "tarun_te_narration" and "tarun" are never given to two characters.
+ */
+const NATIVE: Record<string, Array<[id: string, gender: "female" | "male"]>> = {
+  "en-IN": [
+    ["ishita_en_stories", "female"], ["aditi_en_stories", "female"], ["chandrika_en_stories", "female"],
+    ["roopa_en_conversational", "female"], ["simran_en_conversation", "female"], ["zarina_en_conversation", "female"],
+    ["shubh_en_narration", "male"], ["dev_en_conversational", "male"], ["deven_en_conversation", "male"],
+    ["sarang_en_narration", "male"],
+  ],
+  "hi-IN": [
+    ["kavya_hi_conversational", "female"], ["shreya_hi_conversational", "female"], ["roopa_hi_conversational", "female"],
+    ["ritu_hi_conversation", "female"], ["simran_hi_conversation", "female"], ["sarika_hi_conversation", "female"],
+    ["tanya_hi_narration", "female"], ["shilpa_hi_narration", "female"],
+    ["rahul_hi_conversational", "male"], ["aditya_hi_conversational", "male"], ["amit_hi_conversational", "male"],
+    ["kabir_hi_conversational", "male"], ["mohit_hi_conversational", "male"], ["tarun_hi_conversational", "male"],
+    ["manan_hi_conversational", "male"], ["sumit_hi_conversational", "male"], ["ashutosh_hi_conversational", "male"],
+    ["aayan_hi_conversational", "male"], ["mani_hi_conversational", "male"],
+  ],
+  "te-IN": [["kavitha_te_conversation", "female"], ["tarun_te_narration", "male"]],
+  "ta-IN": [["gokul_ta_narration", "male"], ["vijay_ta_narration", "male"]],
+  "kn-IN": [["chaitra_kn_conversation", "female"], ["suchitra_kn_narration", "female"], ["chetan_kn_conversation", "male"]],
+  "mr-IN": [
+    ["ishita_mr_conversational", "female"], ["neha_mr_narration", "female"], ["rupali_mr_stories", "female"],
+    ["nilesh_mr_conversation", "male"], ["soham_mr_narration", "male"], ["mukul_mr_stories", "male"],
+  ],
+  "pa-IN": [["anand_pa_conversation", "male"]],
+  "gu-IN": [["pooja_gu_conversational", "female"], ["bhavik_gu_conversation", "male"]],
+  "bn-IN": [["roopa_bn_conversational", "female"], ["arnab_bn_conversation", "male"]],
+};
+
+const LANGUAGE_NAMES: Record<string, string> = {
+  "en-IN": "Indian English", "hi-IN": "Hindi", "te-IN": "Telugu", "ta-IN": "Tamil", "kn-IN": "Kannada",
+  "mr-IN": "Marathi", "pa-IN": "Punjabi", "gu-IN": "Gujarati", "bn-IN": "Bengali",
+};
+
+function nativeOption(id: string, gender: "female" | "male", code: string): VoiceOption {
+  const [name, , ...style] = id.split("_");
+  const manner = /conversation/.test(style.join(" ")) ? "conversational" : "storyteller";
+  return {
+    id,
+    label: `${name[0].toUpperCase()}${name.slice(1)} (${gender}, ${LANGUAGE_NAMES[code]} voice, ${manner})`,
+    gender,
+    age: "adult",
+  };
+}
+
+/** Native voices that sounded natural when listened to, and so are given out before the general ones. */
+const LISTENED = new Set(["tarun_te_narration"]);
+
+const NATIVE_IDS = new Set(Object.values(NATIVE).flatMap((voices) => voices.map(([id]) => id)));
+const V3_IDS = new Set<string>([...MALE, ...FEMALE]);
+
+/** Every Sarvam voice, native ones included: for knowing a voice's gender whatever the language. */
+export const ALL_SARVAM_VOICE_OPTIONS: VoiceOption[] = [
+  ...Object.entries(NATIVE).flatMap(([code, voices]) => voices.map(([id, gender]) => nativeOption(id, gender, code))),
+  ...SARVAM_VOICE_OPTIONS,
+];
 
 export function isSarvamVoice(id: string): boolean {
-  return SARVAM_IDS.has(id);
+  return V3_IDS.has(id) || NATIVE_IDS.has(id);
+}
+
+/** The model a voice belongs to: the native voices are Bulbul v4 Flash, the others Bulbul v3. */
+export function sarvamModelFor(id: string): "bulbul:v3" | "bulbul:v4-flash" {
+  return NATIVE_IDS.has(id) ? "bulbul:v4-flash" : "bulbul:v3";
 }
 
 /** Our language codes (see lib/languages) to Sarvam's. */
@@ -90,6 +160,22 @@ export function sarvamLanguage(language: string | undefined, text: string): stri
   // No language named (or "Original"): go by the letters the line is written in.
   if (isEnglish(name)) return BY_SCRIPT[mainScript(text)] ?? null;
   return null;
+}
+
+/**
+ * The voices for a story in this language. Characters are given the first
+ * free voice of their gender, so the order matters: native voices that passed
+ * a listening test, then the general voices (which speak every language),
+ * then the language's other native voices, to choose by hand.
+ */
+export function sarvamVoicesFor(language: string): VoiceOption[] {
+  const code = language.trim() ? sarvamLanguage(language, "") : null;
+  const native = code ? (NATIVE[code] ?? []).map(([id, gender]) => nativeOption(id, gender, code)) : [];
+  return [
+    ...native.filter((voice) => LISTENED.has(voice.id)),
+    ...SARVAM_VOICE_OPTIONS,
+    ...native.filter((voice) => !LISTENED.has(voice.id)),
+  ];
 }
 
 /** Whether Sarvam's voices can speak a story in this language. Empty means "as written", which is assumed to be fine. */

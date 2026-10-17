@@ -1,5 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { SARVAM_VOICE_OPTIONS, isSarvamVoice, sarvamLanguage, sarvamSpeaks } from "@/lib/sarvam";
+import {
+  ALL_SARVAM_VOICE_OPTIONS,
+  SARVAM_VOICE_OPTIONS,
+  isSarvamVoice,
+  sarvamLanguage,
+  sarvamModelFor,
+  sarvamSpeaks,
+  sarvamVoicesFor,
+} from "@/lib/sarvam";
 import { sarvamSettings, speakWithSarvam } from "@/lib/server/sarvam";
 import { DEFAULT_ART_STYLE, StorySchema, VOICE_AGE_SETTINGS } from "@/lib/story";
 import { OPENAI_VOICE_OPTIONS, castVoices } from "@/lib/voices";
@@ -102,6 +110,66 @@ describe("Sarvam's voices and languages", () => {
     const gender = (id: string) => OPENAI_VOICE_OPTIONS.find((voice) => voice.id === id)?.gender;
     expect(back.characters.map((character) => gender(character.voice))).toEqual(["male", "female", "male"]);
     expect(gender(back.narratorVoice)).toBe("female");
+  });
+});
+
+describe("Sarvam's native voices for each language", () => {
+  const telugu = StorySchema.parse({
+    title: "రామాయణం",
+    aspectRatio: "9:16",
+    artStyle: DEFAULT_ART_STYLE,
+    narratorVoice: "sage",
+    characters: [
+      { id: "c1", name: "Rama", look: "x", size: "large", voice: "cedar", voiceAge: "adult", voiceStyle: "" },
+      { id: "c2", name: "Sita", look: "x", size: "large", voice: "marin", voiceAge: "adult", voiceStyle: "" },
+      { id: "c3", name: "Lakshmana", look: "x", size: "large", voice: "ash", voiceAge: "adult", voiceStyle: "" },
+      { id: "c4", name: "Hanuman", look: "x", size: "large", voice: "verse", voiceAge: "adult", voiceStyle: "" },
+      { id: "c5", name: "Ravana", look: "x", size: "large", voice: "ballad", voiceAge: "adult", voiceStyle: "" },
+    ],
+    locations: [{ id: "l1", name: "Forest", look: "x" }],
+    scenes: [{ id: "s1", locationId: "l1", onStage: ["c1", "c2", "c3", "c4", "c5"], lines: [{ speaker: "c1", text: "సీతా" }] }],
+  });
+
+  it("gives out listened-to native voices first, then the general ones, and offers the rest by hand", () => {
+    const voices = sarvamVoicesFor("Telugu");
+    expect(voices[0]).toMatchObject({ id: "tarun_te_narration", label: "Tarun (male, Telugu voice, storyteller)" });
+    expect(voices.slice(1, 38)).toEqual(SARVAM_VOICE_OPTIONS);
+    // Kavitha sounded halting in a listening test: still offered, but last, so never given out by itself.
+    expect(voices.at(-1)).toMatchObject({ id: "kavitha_te_conversation", label: "Kavitha (female, Telugu voice, conversational)" });
+    // Pooja's Telugu voice sounded worse still, so it is not offered at all.
+    expect(voices.some((voice) => voice.id.startsWith("pooja_te"))).toBe(false);
+    // Native voices nobody has listened to yet come after the general ones.
+    expect(sarvamVoicesFor("Hindi")[0].id).toBe("ishita");
+    expect(sarvamVoicesFor("English")[0].id).toBe("ishita");
+    expect(sarvamVoicesFor("English").at(-1)?.id).toMatch(/_en_/);
+    // Languages without native voices (Malayalam, Odia) get the general ones only.
+    expect(sarvamVoicesFor("Malayalam")).toEqual(SARVAM_VOICE_OPTIONS);
+  });
+
+  it("casts a Telugu Ramayan with Tarun as Rama and the general voices, never one person twice", () => {
+    const cast = castVoices(telugu, sarvamVoicesFor("Telugu"));
+    expect(cast.characters.map((character) => character.voice)).toEqual([
+      "tarun_te_narration",
+      "ishita",
+      "shubh",
+      "aditya",
+      "rahul",
+    ]);
+    expect(cast.narratorVoice).toBe("priya");
+    const people = [cast.narratorVoice, ...cast.characters.map((character) => character.voice)].map((id) => id.split("_")[0]);
+    expect(new Set(people).size).toBe(people.length);
+  });
+
+  it("speaks the native voices with Bulbul v4 Flash and the others with Bulbul v3", async () => {
+    expect(sarvamModelFor("kavitha_te_conversation")).toBe("bulbul:v4-flash");
+    expect(sarvamModelFor("shubh")).toBe("bulbul:v3");
+    expect(isSarvamVoice("tarun_te_narration") && isSarvamVoice("ishita") && !isSarvamVoice("kavitha_te_ads")).toBe(true);
+    // Every native voice has a clear gender, so a story can move between languages and keep it.
+    expect(ALL_SARVAM_VOICE_OPTIONS.every((voice) => voice.gender !== "neutral")).toBe(true);
+    const calls = fakeSarvam();
+    await speakWithSarvam(SETTINGS, { text: "సీతా", voice: "kavitha_te_conversation", language: "Telugu" });
+    await speakWithSarvam(SETTINGS, { text: "సీతా", voice: "shubh", language: "Telugu" });
+    expect(calls.map((call) => call.body.model)).toEqual(["bulbul:v4-flash", "bulbul:v3"]);
   });
 });
 

@@ -3,6 +3,8 @@
  * the picture and feeds them into the recording.
  */
 
+import { tightenPauses } from "./pauses";
+
 /** Loudness is sampled this many times a second, to drive the mouth. */
 const ENVELOPE_RATE = 50;
 const QUIET = 0.08;
@@ -51,6 +53,16 @@ function analyse(buffer: AudioBuffer): Pick<Clip, "envelope" | "speechStart" | "
 }
 
 /** Re-renders a recording at a different speed, shifting its pitch with it. */
+/** The recording with its long silences shortened to a breath (see lib/pauses.ts), so the line flows. */
+function flowing(context: BaseAudioContext, buffer: AudioBuffer): AudioBuffer {
+  const channels = Array.from({ length: buffer.numberOfChannels }, (_, c) => buffer.getChannelData(c));
+  const tightened = tightenPauses(channels, buffer.sampleRate);
+  if (tightened === channels) return buffer;
+  const result = context.createBuffer(tightened.length, tightened[0].length, buffer.sampleRate);
+  tightened.forEach((data, c) => result.copyToChannel(data, c));
+  return result;
+}
+
 async function resample(buffer: AudioBuffer, rate: number): Promise<AudioBuffer> {
   const length = Math.max(1, Math.ceil(buffer.length / rate));
   const offline = new OfflineAudioContext(buffer.numberOfChannels, length, buffer.sampleRate);
@@ -94,7 +106,7 @@ export class StoryAudio {
    */
   async decode(dataUrl: string, rate = 1): Promise<Clip> {
     const bytes = await (await fetch(dataUrl)).arrayBuffer();
-    let buffer = await this.context.decodeAudioData(bytes);
+    let buffer = flowing(this.context, await this.context.decodeAudioData(bytes));
     if (rate !== 1) buffer = await resample(buffer, rate);
     return { buffer, duration: buffer.duration, ...analyse(buffer) };
   }

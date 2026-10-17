@@ -61,12 +61,13 @@ import { VideoDetails } from "./VideoDetails";
 import { Button } from "./ui";
 
 /**
- * A short breath after each spoken line. An answer follows a question a little
- * faster, as it does in real conversation, so the exchange does not sound
- * like turns being read out.
+ * A short breath after each spoken line. Every recording is trimmed to its
+ * last word (lib/pauses.ts), so this is the whole gap between speakers. An
+ * answer follows a question a little faster, as it does in real
+ * conversation, so the exchange does not sound like turns being read out.
  */
 const pauseAfter = (line: StoryLine, calm = false) =>
-  (line.text.trim().endsWith("?") ? 0.22 : 0.35) + (calm ? 0.5 : 0);
+  (line.text.trim().endsWith("?") ? 0.16 : 0.28) + (calm ? 0.5 : 0);
 
 type Batch = { done: number; total: number } | null;
 

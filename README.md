@@ -62,7 +62,9 @@ the download with the built-in example.
 | `OPENAI_IMAGE_EDIT_MODEL` | No | Model used to redraw a character with its mouth open. Defaults to `OPENAI_IMAGE_MODEL`. |
 | `OPENAI_IMAGE_QUALITY` | No | `low`, `medium` or `high`. Higher costs more and takes longer. |
 | `OPENAI_SPEECH_MODEL` | For voices, unless SpeechGen is used | The text-to-speech model, for example `gpt-4o-mini-tts`. |
-| `SARVAM_API_KEY` | No (recommended) | Your [Sarvam AI](https://www.sarvam.ai) API key, for real Indian voices in Indian English and ten Indian languages. Server-side only. See [Sarvam AI voices](#sarvam-ai-voices-indian). |
+| `GEMINI_API_KEY` | No (recommended) | Your [Google AI Studio](https://aistudio.google.com) API key, for Gemini's acted voices in every language. Server-side only. See [Gemini voices](#gemini-voices-recommended). |
+| `GEMINI_TTS_MODEL` | No | Another Gemini speech model. Default `gemini-3.8-flash-tts`. |
+| `SARVAM_API_KEY` | No | Your [Sarvam AI](https://www.sarvam.ai) API key, for real Indian voices in Indian English and ten Indian languages. Server-side only. See [Sarvam AI voices](#sarvam-ai-voices-indian). |
 | `SPEECHGEN_API_TOKEN` | No | Your [SpeechGen](https://speechgen.io) API token. Set it together with `SPEECHGEN_EMAIL` to use SpeechGen's voices instead of OpenAI's. Server-side only. See [SpeechGen voices](#speechgen-voices). |
 | `SPEECHGEN_EMAIL` | With the token | The email address of the SpeechGen account. |
 | `SPEECHGEN_ACCENT` | No | The accent to prefer when a language has several: `Indian` (the default), `US`, `British`… |
@@ -151,6 +153,12 @@ Things to know:
   you share the video.
 - **Voices cost per line.** One request per spoken line, so about 15 for the example story.
   Editing a line, or changing a character's voice, means recording that line again.
+- **Lines flow, without robotic stops.** Voices often stop for a third of a second or more
+  at every comma and phrase, and every recording starts and ends with dead air, so a line
+  sounds like pieces stuck together. After each line is recorded, every pause inside it is
+  shortened to a breath (0.16 s) and the dead air at both ends is trimmed, with a short fade
+  at each cut (`lib/pauses.ts`). Only silence is cut, never the words. The gap between
+  speakers is then a quarter-second or so, like real conversation.
 - **Natural, human-sounding voices.** Each line is voiced like an actor would say it, not
   read aloud: the voice is told who the character is, how they sound, and how this particular
   line is said. The story writer adds a short note to every line ("proud and excited",
@@ -307,16 +315,16 @@ Limits worth knowing:
 - `OPENAI_API_KEY` is read only on the server (`lib/server/handler.ts`). It is never sent to
   the browser and never written to logs. The home page only learns *whether* a key exists.
 - Every OpenAI call goes through the server routes in `app/api/`.
-- The Sarvam AI key (`SARVAM_API_KEY`) and the SpeechGen token (`SPEECHGEN_API_TOKEN`), if
-  you use them, are handled the same way: read on the server only, sent to the voice service
-  with each request from the server (Sarvam in a request header, SpeechGen in the body of a
-  POST request), and never logged, put in a web address or sent to the browser. Visitors
-  cannot supply their own.
+- The Gemini key (`GEMINI_API_KEY`), the Sarvam AI key (`SARVAM_API_KEY`) and the SpeechGen
+  token (`SPEECHGEN_API_TOKEN`), if you use them, are handled the same way: read on the server
+  only, sent to the voice service with each request from the server (Gemini and Sarvam in a
+  request header, SpeechGen in the body of a POST request), and never logged, put in a web
+  address or sent to the browser. Visitors cannot supply their own.
 - **Use my own key** (the "API key" button): the key is kept in the page's memory only. It is
   not saved to localStorage, cookies or the URL. It is sent over HTTPS in a request header,
   used for that one request and then discarded. The server refuses it over plain HTTP (except
   on `localhost`).
-- Error messages from OpenAI, Sarvam AI and SpeechGen are never passed through to users or logs,
+- Error messages from OpenAI, Google, Sarvam AI and SpeechGen are never passed through to users or logs,
   because they can repeat part of a key.
 - The sign-in secrets (`AUTH_SECRET`, `GOOGLE_CLIENT_SECRET`, `SMTP_PASSWORD`) are also read on
   the server only and never logged. See [Sign-in](#sign-in).
@@ -451,6 +459,43 @@ the text box, where they can be corrected before building the prompt.
 - The language is detected automatically.
 - The button does not appear in browsers that cannot record sound.
 
+### Gemini voices (recommended)
+
+The most human-sounding voices the app can use. [Google Gemini](https://ai.google.dev/gemini-api/docs/speech-generation)
+does not just read a line: it acts it from a written direction. The app gives it the same
+direction it writes for every line: who the character is (their manner and age), how this
+line is said (the **How it is said** note), and the accent (natural Indian English, or a native
+speaker from India for Telugu, Hindi and the other Indian languages). In a listening test of
+a Telugu Ramayan scene it sounded far more natural than Sarvam's or OpenAI's voices. To use it:
+
+1. Sign in at [aistudio.google.com](https://aistudio.google.com) and choose **Get API key →
+   Create API key**.
+2. Add `GEMINI_API_KEY` to the server settings: in Vercel under **Settings → Environment
+   Variables** (tick Production), or in `.env.local` on your own computer. Never paste the key
+   into the page, a chat or the code.
+3. Redeploy (or restart the app).
+
+Then:
+
+- Every story is spoken by Gemini, in any language. The Voices panel lists its 30 voices
+  (14 women's, 16 men's, each with a one-word description such as warm, gentle, gravelly or
+  upbeat) and says the lines are charged to the Google Gemini account. Each character gets
+  the Gemini voice closest to the one the story writer chose: a warm voice becomes Sulafat, a
+  deep one Algenib (gravelly), a lively one Puck, and so on.
+- **The free plan allows only 3 voice lines a minute.** The app waits whenever Google says to
+  and tries again, so recording still finishes, but a one-minute story with about 20 lines
+  takes about 7 minutes. Turn on billing in Google AI Studio for normal speed.
+- Cost with billing: about $0.0135 (around ₹1.20) per minute of finished speech with
+  `gemini-3.8-flash-tts`, as listed on Google's pricing page in October 2026 (the price is
+  due to double from January 2027).
+- All of Gemini's voices are adults. For a child or an older person the voice is asked to act
+  that age and the recording's pitch is raised or lowered a little, as with the other voices.
+- Every line is still screened by OpenAI's moderation and listened back by the voice check.
+  If a re-recording of an unclear line is refused because Gemini is busy, the app waits (up to
+  25 seconds in all) and tries again, then keeps the first take.
+- The key is sent to Google in a request header from the server only. Remove `GEMINI_API_KEY`
+  to go back to Sarvam's, SpeechGen's or OpenAI's voices.
+
 ### Sarvam AI voices (Indian)
 
 OpenAI's voices are American at heart: asked for an Indian accent they change only a little.
@@ -467,11 +512,19 @@ Telugu, Gujarati, Kannada, Malayalam, Marathi, Punjabi and Odia. To use it:
 
 Then:
 
-- Every story in one of those languages is spoken by Sarvam. The Voices panel lists its 37
-  voices (14 women's, 23 men's) and says the lines are charged to the Sarvam AI account.
-  Stories already cast with OpenAI's voices are given Sarvam voices of the same gender,
-  best first (Sarvam recommends Ishita, Priya and Shubh). Varun is deep and dramatic, good
-  for a villain.
+- Every story in one of those languages is spoken by Sarvam, and the Voices panel says the
+  lines are charged to the Sarvam AI account.
+- **Which voices are given out.** Characters get Sarvam's 37 general voices (Bulbul v3; Sarvam
+  recommends Ishita, Priya and Shubh), which speak every language, each keeping their
+  gender; one person's voice is never given to two characters. Sarvam's newer voices
+  (Bulbul v4 Flash) are each recorded for one language and style. They are listed in the
+  Voices menu after the general ones, but given out first only after passing a listening
+  test: in a Telugu test, the conversational voices Kavitha and Pooja sounded halting (Pooja
+  is not offered at all), while Tarun, a Telugu storyteller, is given to Telugu stories first.
+  Native voices are listed for Indian English, Hindi, Telugu, Tamil, Kannada, Marathi,
+  Punjabi, Gujarati and Bengali. The lists, and the voices that passed (`LISTENED`), are in
+  `lib/sarvam.ts`.
+- Varun (general) is deep and dramatic, good for a villain.
 - A story in another language (for example French) keeps OpenAI's voices.
 - All of Sarvam's voices are adults. For a child or an older person the recording's pitch is
   raised or lowered, as with OpenAI's voices, and Sarvam is asked to speak a little slower
@@ -483,7 +536,8 @@ Then:
 - Cost: about ₹30 for every 10,000 characters (Sarvam's pricing page), so a one-minute story
   costs a few rupees.
 - Remove `SARVAM_API_KEY` to go back to OpenAI's (or SpeechGen's) voices. If both Sarvam and
-  SpeechGen are set up, Sarvam is used for the languages it speaks.
+  SpeechGen are set up, Sarvam is used for the languages it speaks. If Gemini is set up too,
+  Gemini is used instead of both.
 
 ### SpeechGen voices
 
@@ -770,7 +824,9 @@ lib/
   story.ts                 Cartoon story format, timing and caption rules
   storyRenderer.ts         Draws any moment of a cartoon story on a canvas
   voices.ts                Voice lists, and giving each character a voice of the right gender and age
+  gemini.ts                Gemini's voices (the server part, which speaks each line, is in server/gemini.ts)
   sarvam.ts                Sarvam AI's Indian voices and languages (the server part is in server/sarvam.ts)
+  pauses.ts                Shortens long pauses in recorded lines so they flow
   languages.ts             The language list, and which languages OpenAI's voices speak well
   translate.ts             Taking a video's words out for translation and putting them back
   disclaimer.ts            The health disclaimer in each language, followed by the English

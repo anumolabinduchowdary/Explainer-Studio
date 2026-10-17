@@ -1,6 +1,6 @@
 import "server-only";
 import { z } from "zod";
-import { sarvamLanguage } from "@/lib/sarvam";
+import { sarvamLanguage, sarvamModelFor } from "@/lib/sarvam";
 import { VOICE_AGE_SETTINGS, type SpeechRequest } from "@/lib/story";
 import { AppError } from "./appError";
 
@@ -17,8 +17,6 @@ import { AppError } from "./appError";
  */
 
 const DEFAULT_API = "https://api.sarvam.ai";
-/** The model the voice list in lib/sarvam.ts belongs to. */
-const MODEL = "bulbul:v3";
 const MAX_AUDIO_BYTES = 8_000_000;
 
 export type SarvamSettings = { key: string; baseUrl: string };
@@ -101,7 +99,8 @@ export async function speakWithSarvam(
         text: request.text,
         language_code: language,
         speaker: request.voice,
-        model: MODEL,
+        // The language's own native voices are Bulbul v4 Flash; the general ones Bulbul v3.
+        model: sarvamModelFor(request.voice),
         pace,
         speech_sample_rate: 24000,
         output_audio_codec: "mp3",

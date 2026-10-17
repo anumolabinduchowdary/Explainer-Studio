@@ -271,7 +271,8 @@ export const SpeechRequestSchema = z.object({
 export type SpeechRequest = z.infer<typeof SpeechRequestSchema>;
 
 export const SpeechResponseSchema = z.object({
-  audio: z.string().regex(/^data:audio\/mpeg;base64,/),
+  /** MP3 from most voice services; WAV from Gemini. */
+  audio: z.string().regex(/^data:audio\/(mpeg|wav);base64,/),
   /** Whether the recording was listened back and the words were heard as written. */
   check: VoiceCheckSchema.optional(),
 });

@@ -1,17 +1,19 @@
 import { z } from "zod";
-import { SARVAM_VOICE_OPTIONS } from "./sarvam";
+import { GEMINI_VOICE_OPTIONS } from "./gemini";
+import { ALL_SARVAM_VOICE_OPTIONS } from "./sarvam";
 import { STORY_LIMITS, VOICES, VOICE_AGE_SETTINGS, type Story, type VoiceAge } from "./story";
 
 /**
  * Voices, whichever service speaks them.
  *
  * The app can speak lines with OpenAI's voices or, when one is set up on the
- * server, with Sarvam AI's real Indian voices or SpeechGen's. Each service has
+ * server, with Google Gemini's acted voices, Sarvam AI's Indian voices or
+ * SpeechGen's. Each service has
  * its own list of voice names, so the browser asks the server for the list and
  * everything else works from these plain descriptions.
  */
 
-export const SPEECH_PROVIDERS = ["openai", "sarvam", "speechgen"] as const;
+export const SPEECH_PROVIDERS = ["openai", "gemini", "sarvam", "speechgen"] as const;
 export type SpeechProvider = (typeof SPEECH_PROVIDERS)[number];
 
 export const VoiceOptionSchema = z.object({
@@ -28,6 +30,8 @@ export const VoiceOptionSchema = z.object({
    * but never given out automatically, so a story keeps one accent.
    */
   otherAccent: z.boolean().optional(),
+  /** The OpenAI voice this one sounds most like, so a story's casting carries over (Gemini). */
+  like: z.string().max(40).optional(),
 });
 export type VoiceOption = z.infer<typeof VoiceOptionSchema>;
 
@@ -80,8 +84,11 @@ export function ageRate(characterAge: VoiceAge, voice: VoiceOption | undefined):
   return VOICE_AGE_SETTINGS[characterAge].rate;
 }
 
-/** "Justin" and "Justin plus" are one voice in two qualities. */
-const sameVoice = (id: string) => id.toLowerCase().replace(/\s+plus$/, "");
+/**
+ * "Justin" and "Justin plus" are one voice in two qualities, and Sarvam's
+ * "kavitha_te_conversation" is the same person as "kavitha".
+ */
+const sameVoice = (id: string) => id.toLowerCase().replace(/\s+plus$/, "").split("_")[0];
 
 /**
  * Chooses a voice for a speaker: the right gender and, where the list has
@@ -128,11 +135,18 @@ export function castVoices(story: Story, voices: ReadonlyArray<VoiceOption>): St
   const pool = sameAccent.length > 0 ? sameAccent : voices;
 
   const genderOf = (voice: string): VoiceOption["gender"] =>
-    [...OPENAI_VOICE_OPTIONS, ...SARVAM_VOICE_OPTIONS, ...voices].find((option) => option.id === voice)?.gender ?? "neutral";
+    [...OPENAI_VOICE_OPTIONS, ...GEMINI_VOICE_OPTIONS, ...ALL_SARVAM_VOICE_OPTIONS, ...voices].find(
+      (option) => option.id === voice,
+    )?.gender ?? "neutral";
   const taken = new Set(speakers.filter((voice) => known.has(voice)).map(sameVoice));
   const choose = (current: string, age: VoiceAge): string => {
     if (known.has(current)) return current;
-    const picked = pickVoice(pool, { gender: genderOf(current), age }, taken);
+    // The voice that sounds most like the one the writer chose (a deep voice for a villain, say)
+    // comes first, unless the list has real voices of the character's age to prefer.
+    const realAge = age === "child" || age === "older" ? age : "adult";
+    const hasRealAge = realAge !== "adult" && pool.some((voice) => voice.age === realAge);
+    const alike = hasRealAge ? undefined : pool.find((voice) => voice.like === current && !taken.has(sameVoice(voice.id)));
+    const picked = alike ?? pickVoice(pool, { gender: genderOf(current), age }, taken);
     if (!picked) return current;
     taken.add(sameVoice(picked.id));
     return picked.id;

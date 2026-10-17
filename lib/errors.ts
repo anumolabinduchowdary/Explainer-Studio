@@ -105,7 +105,7 @@ export const ERROR_COPY: Record<ErrorCode, { title: string; message: string }> =
   voice_key_invalid: {
     title: "The voice service rejected its key",
     message:
-      "The voice service did not accept its key in the server settings (SARVAM_API_KEY, or SPEECHGEN_API_TOKEN and SPEECHGEN_EMAIL). Check it, then redeploy.",
+      "The voice service did not accept its key in the server settings (GEMINI_API_KEY, SARVAM_API_KEY, or SPEECHGEN_API_TOKEN and SPEECHGEN_EMAIL). Check it, then redeploy.",
   },
   voice_credit: {
     title: "The voice account is out of credit",
