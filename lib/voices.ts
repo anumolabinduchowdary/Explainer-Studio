@@ -1,16 +1,17 @@
 import { z } from "zod";
+import { SARVAM_VOICE_OPTIONS } from "./sarvam";
 import { STORY_LIMITS, VOICES, VOICE_AGE_SETTINGS, type Story, type VoiceAge } from "./story";
 
 /**
  * Voices, whichever service speaks them.
  *
- * The app can speak lines with OpenAI's voices or, when it is set up on the
- * server, with SpeechGen's. Each service has its own list of voice names, so
- * the browser asks the server for the list and everything else works from
- * these plain descriptions.
+ * The app can speak lines with OpenAI's voices or, when one is set up on the
+ * server, with Sarvam AI's real Indian voices or SpeechGen's. Each service has
+ * its own list of voice names, so the browser asks the server for the list and
+ * everything else works from these plain descriptions.
  */
 
-export const SPEECH_PROVIDERS = ["openai", "speechgen"] as const;
+export const SPEECH_PROVIDERS = ["openai", "sarvam", "speechgen"] as const;
 export type SpeechProvider = (typeof SPEECH_PROVIDERS)[number];
 
 export const VoiceOptionSchema = z.object({
@@ -127,7 +128,7 @@ export function castVoices(story: Story, voices: ReadonlyArray<VoiceOption>): St
   const pool = sameAccent.length > 0 ? sameAccent : voices;
 
   const genderOf = (voice: string): VoiceOption["gender"] =>
-    OPENAI_VOICE_OPTIONS.find((option) => option.id === voice)?.gender ?? "neutral";
+    [...OPENAI_VOICE_OPTIONS, ...SARVAM_VOICE_OPTIONS, ...voices].find((option) => option.id === voice)?.gender ?? "neutral";
   const taken = new Set(speakers.filter((voice) => known.has(voice)).map(sameVoice));
   const choose = (current: string, age: VoiceAge): string => {
     if (known.has(current)) return current;

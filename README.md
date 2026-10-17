@@ -62,6 +62,7 @@ the download with the built-in example.
 | `OPENAI_IMAGE_EDIT_MODEL` | No | Model used to redraw a character with its mouth open. Defaults to `OPENAI_IMAGE_MODEL`. |
 | `OPENAI_IMAGE_QUALITY` | No | `low`, `medium` or `high`. Higher costs more and takes longer. |
 | `OPENAI_SPEECH_MODEL` | For voices, unless SpeechGen is used | The text-to-speech model, for example `gpt-4o-mini-tts`. |
+| `SARVAM_API_KEY` | No (recommended) | Your [Sarvam AI](https://www.sarvam.ai) API key, for real Indian voices in Indian English and ten Indian languages. Server-side only. See [Sarvam AI voices](#sarvam-ai-voices-indian). |
 | `SPEECHGEN_API_TOKEN` | No | Your [SpeechGen](https://speechgen.io) API token. Set it together with `SPEECHGEN_EMAIL` to use SpeechGen's voices instead of OpenAI's. Server-side only. See [SpeechGen voices](#speechgen-voices). |
 | `SPEECHGEN_EMAIL` | With the token | The email address of the SpeechGen account. |
 | `SPEECHGEN_ACCENT` | No | The accent to prefer when a language has several: `Indian` (the default), `US`, `British`… |
@@ -163,8 +164,8 @@ Things to know:
   English as natural Indian English, with Indian names and words said the Indian way; Hindi,
   Telugu and the other Indian languages as a native speaker from India; and any other language
   the way a fluent speaker from India would say it. The accent is acted by
-  the voice, so it is close but not perfect; [SpeechGen voices](#speechgen-voices) use real
-  Indian voices instead.
+  the voice, so it is only partly Indian; [Sarvam AI voices](#sarvam-ai-voices-indian) are
+  real Indian voices and sound far more natural for Indian families.
 - **Children and older people.** With [SpeechGen voices](#speechgen-voices) switched on,
   English stories use real children's and older voices. OpenAI's 13 voices are all adults. The **Age** setting
   (Child, Teenager, Adult, Older person) gets closer in two ways at once: the voice is asked
@@ -306,14 +307,16 @@ Limits worth knowing:
 - `OPENAI_API_KEY` is read only on the server (`lib/server/handler.ts`). It is never sent to
   the browser and never written to logs. The home page only learns *whether* a key exists.
 - Every OpenAI call goes through the server routes in `app/api/`.
-- The SpeechGen token (`SPEECHGEN_API_TOKEN`), if you use one, is handled the same way: read
-  on the server only, sent to SpeechGen in the body of a POST request, and never logged, put
-  in a web address or sent to the browser. Visitors cannot supply their own.
+- The Sarvam AI key (`SARVAM_API_KEY`) and the SpeechGen token (`SPEECHGEN_API_TOKEN`), if
+  you use them, are handled the same way: read on the server only, sent to the voice service
+  with each request from the server (Sarvam in a request header, SpeechGen in the body of a
+  POST request), and never logged, put in a web address or sent to the browser. Visitors
+  cannot supply their own.
 - **Use my own key** (the "API key" button): the key is kept in the page's memory only. It is
   not saved to localStorage, cookies or the URL. It is sent over HTTPS in a request header,
   used for that one request and then discarded. The server refuses it over plain HTTP (except
   on `localhost`).
-- Error messages from OpenAI and SpeechGen are never passed through to users or logs,
+- Error messages from OpenAI, Sarvam AI and SpeechGen are never passed through to users or logs,
   because they can repeat part of a key.
 - The sign-in secrets (`AUTH_SECRET`, `GOOGLE_CLIENT_SECRET`, `SMTP_PASSWORD`) are also read on
   the server only and never logged. See [Sign-in](#sign-in).
@@ -447,6 +450,40 @@ the text box, where they can be corrected before building the prompt.
 - The recording is passed to OpenAI and is not stored by this app.
 - The language is detected automatically.
 - The button does not appear in browsers that cannot record sound.
+
+### Sarvam AI voices (Indian)
+
+OpenAI's voices are American at heart: asked for an Indian accent they change only a little.
+[Sarvam AI](https://www.sarvam.ai) is an Indian company whose voices (Bulbul v3) are real
+Indian voices, made for Indian English and ten Indian languages: Hindi, Bengali, Tamil,
+Telugu, Gujarati, Kannada, Malayalam, Marathi, Punjabi and Odia. To use it:
+
+1. Sign up at [dashboard.sarvam.ai](https://dashboard.sarvam.ai) and create an API key. New
+   accounts get free credit.
+2. Add `SARVAM_API_KEY` to the server settings: in Vercel under **Settings → Environment
+   Variables**, or in `.env.local` on your own computer. Never paste the key into the page, a
+   chat or the code.
+3. Redeploy (or restart the app).
+
+Then:
+
+- Every story in one of those languages is spoken by Sarvam. The Voices panel lists its 37
+  voices (14 women's, 23 men's) and says the lines are charged to the Sarvam AI account.
+  Stories already cast with OpenAI's voices are given Sarvam voices of the same gender,
+  best first (Sarvam recommends Ishita, Priya and Shubh). Varun is deep and dramatic, good
+  for a villain.
+- A story in another language (for example French) keeps OpenAI's voices.
+- All of Sarvam's voices are adults. For a child or an older person the recording's pitch is
+  raised or lowered, as with OpenAI's voices, and Sarvam is asked to speak a little slower
+  to make up for it.
+- Sarvam does not take acting notes, so the **How it is said** notes and the manner of
+  speaking are not used; its voices already speak with natural Indian rhythm.
+- Every line is still screened by OpenAI's moderation and listened back by the voice check
+  (`OPENAI_TRANSCRIBE_MODEL`).
+- Cost: about ₹30 for every 10,000 characters (Sarvam's pricing page), so a one-minute story
+  costs a few rupees.
+- Remove `SARVAM_API_KEY` to go back to OpenAI's (or SpeechGen's) voices. If both Sarvam and
+  SpeechGen are set up, Sarvam is used for the languages it speaks.
 
 ### SpeechGen voices
 
@@ -733,6 +770,7 @@ lib/
   story.ts                 Cartoon story format, timing and caption rules
   storyRenderer.ts         Draws any moment of a cartoon story on a canvas
   voices.ts                Voice lists, and giving each character a voice of the right gender and age
+  sarvam.ts                Sarvam AI's Indian voices and languages (the server part is in server/sarvam.ts)
   languages.ts             The language list, and which languages OpenAI's voices speak well
   translate.ts             Taking a video's words out for translation and putting them back
   disclaimer.ts            The health disclaimer in each language, followed by the English

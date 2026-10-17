@@ -105,11 +105,11 @@ export const ERROR_COPY: Record<ErrorCode, { title: string; message: string }> =
   voice_key_invalid: {
     title: "The voice service rejected its key",
     message:
-      "SpeechGen did not accept the token or email in the server settings. Check SPEECHGEN_API_TOKEN and SPEECHGEN_EMAIL, then redeploy.",
+      "The voice service did not accept its key in the server settings (SARVAM_API_KEY, or SPEECHGEN_API_TOKEN and SPEECHGEN_EMAIL). Check it, then redeploy.",
   },
   voice_credit: {
     title: "The voice account is out of credit",
-    message: "The SpeechGen account has no balance left. Top it up at speechgen.io, then try again.",
+    message: "The voice service account has no credit left. Top it up, then try again.",
   },
   voice_unavailable: {
     title: "That voice can't be used",
