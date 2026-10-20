@@ -24,6 +24,8 @@ export const YouTubeStatusSchema = z.object({
   email: z.string().optional(),
   /** How new uploads appear: public, unlisted or private. */
   privacy: z.enum(["public", "unlisted", "private"]).optional(),
+  /** Whether each upload is handed to the Video Insights app. */
+  insights: z.boolean().optional(),
 });
 export type YouTubeStatus = z.infer<typeof YouTubeStatusSchema>;
 
@@ -60,7 +62,8 @@ export const StartResponseSchema = z.object({ upload: z.string().min(20) });
 
 export const ChunkResponseSchema = z.union([
   z.object({ done: z.literal(false), received: z.number().int().nonnegative() }),
-  z.object({ done: z.literal(true), videoId: z.string() }),
+  /** The receipt (encrypted) proves to the server that this browser has just uploaded the video. */
+  z.object({ done: z.literal(true), videoId: z.string(), receipt: z.string().optional() }),
 ]);
 
 export const ThumbnailRequestSchema = z.object({
@@ -74,6 +77,52 @@ export const ThumbnailRequestSchema = z.object({
 export const ThumbnailResponseSchema = z.object({ ok: z.boolean(), reason: z.string().optional() });
 
 export const DetailsResponseSchema = z.object({ details: VideoDetailsSchema });
+
+/* ------------------------------------------------------------------ */
+/* Video Insights                                                      */
+/* ------------------------------------------------------------------ */
+
+/** What Video Insights (a separate app) takes about the video's scenes. */
+export const INSIGHTS_LIMITS = { scenes: 40, sceneText: 120 } as const;
+
+export const InsightsSceneSchema = z.object({
+  startSec: z.number().nonnegative().max(86_400),
+  text: z.string().max(INSIGHTS_LIMITS.sceneText),
+});
+export type InsightsScene = z.infer<typeof InsightsSceneSchema>;
+
+/** The scenes as Video Insights takes them: at most 40, each with a few words. */
+export function insightsScenes(scenes: ReadonlyArray<{ startSec: number; text: string }>): InsightsScene[] {
+  return scenes.slice(0, INSIGHTS_LIMITS.scenes).map((scene) => {
+    const text = scene.text.replace(/\s+/g, " ").trim();
+    return {
+      startSec: Math.round(Math.max(0, scene.startSec) * 10) / 10,
+      text: text.length > INSIGHTS_LIMITS.sceneText ? `${text.slice(0, INSIGHTS_LIMITS.sceneText - 1).trimEnd()}…` : text,
+    };
+  });
+}
+
+/** Asks the server to tell Video Insights about a video this browser has just uploaded. */
+export const TrackRequestSchema = z.object({
+  receipt: z.string().min(20).max(4000),
+  studio: z.object({
+    kind: z.enum(["explainer", "story"]),
+    title: z.string().trim().max(200),
+    language: z.string().trim().max(LANGUAGE_MAX),
+    health: z.boolean(),
+    aiVoices: z.boolean(),
+    durationSec: z.number().nonnegative().max(86_400),
+    /** The aspect ratio, e.g. "9:16". */
+    shape: z.string().trim().max(16),
+    scenes: z.array(InsightsSceneSchema).max(INSIGHTS_LIMITS.scenes),
+  }),
+});
+export type TrackRequest = z.infer<typeof TrackRequestSchema>;
+/** The report's address, or null when Video Insights is not set up or gave none. */
+export const TrackResponseSchema = z.object({
+  reportUrl: z.string().regex(/^https?:\/\//).nullable(),
+  tracking: z.boolean(),
+});
 
 /** What a video page tells the YouTube panel about its video. */
 export type YouTubeInfo = {
@@ -92,6 +141,12 @@ export type YouTubeInfo = {
   apiKey: string;
   /** A 1280×720 JPEG data URL for the thumbnail, or null if one cannot be made. */
   makeThumbnail: () => Promise<string | null>;
+  /** For Video Insights: the video's length in seconds. */
+  durationSec?: number;
+  /** For Video Insights: the aspect ratio, e.g. "9:16". */
+  shape?: string;
+  /** For Video Insights: when each scene starts, and a few words from it. */
+  scenes?: InsightsScene[];
 };
 
 export const youtubeLink = (videoId: string) => `https://youtu.be/${videoId}`;
@@ -145,12 +200,12 @@ async function sendChunk(
   }
 }
 
-/** Sends the whole video, piece by piece, and returns YouTube's id for it. */
+/** Sends the whole video, piece by piece, and returns YouTube's id for it and the upload's receipt. */
 export async function sendVideo(
   upload: string,
   video: Blob,
   options: { onProgress?: (sent: number, total: number) => void; signal?: AbortSignal } = {},
-): Promise<string> {
+): Promise<{ videoId: string; receipt?: string }> {
   const total = video.size;
   let start = 0;
   // A piece YouTube did not fully take is sent again from where it stopped.
@@ -159,7 +214,7 @@ export async function sendVideo(
     const result = await sendChunk(upload, video.slice(start, end), start, total, options.signal);
     if (result.done) {
       options.onProgress?.(total, total);
-      return result.videoId;
+      return { videoId: result.videoId, receipt: result.receipt };
     }
     start = result.received;
     options.onProgress?.(start, total);

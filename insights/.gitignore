@@ -1,0 +1,12 @@
+/node_modules
+/.next/
+/out/
+/coverage
+# The local database used when DATABASE_URL is not set
+/.data/
+.env*
+!.env.example
+.vercel
+*.tsbuildinfo
+next-env.d.ts
+.DS_Store

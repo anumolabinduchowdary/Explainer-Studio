@@ -1,6 +1,7 @@
 import "server-only";
 import { createHash } from "node:crypto";
 import { EncryptJWT, jwtDecrypt, type JWTPayload } from "jose";
+import type { SessionUser } from "@/lib/auth";
 import { SOCIAL_HANDLE } from "@/lib/config";
 import { disclaimerLines } from "@/lib/disclaimer";
 import { TRUSTED_SOURCES } from "@/lib/quality";
@@ -77,7 +78,8 @@ export function youtubeConfig(): YouTubeConfig | null {
 /* Sealed values kept in the browser                                   */
 /* ------------------------------------------------------------------ */
 
-type SealUse = "youtube-account" | "youtube-upload";
+/** "youtube-receipt": proof that this browser has just uploaded a video, for Video Insights. */
+type SealUse = "youtube-account" | "youtube-upload" | "youtube-receipt";
 
 export async function seal(config: YouTubeConfig, use: SealUse, claims: JWTPayload, lifetimeSec: number): Promise<string> {
   return new EncryptJWT(claims)
@@ -228,7 +230,8 @@ export function isYouTubeUpload(address: string): boolean {
   }
 }
 
-export type ChunkResult = { done: false; received: number } | { done: true; videoId: string };
+/** The channel's id stays on the server: it only goes into the upload's receipt. */
+export type ChunkResult = { done: false; received: number } | { done: true; videoId: string; channelId?: string };
 
 /** Sends one piece of the video to the open upload. */
 export async function sendChunk(
@@ -260,9 +263,10 @@ export async function sendChunk(
     throw new AppError("youtube_failed", 410, { message: "The upload took too long and was closed by YouTube. Please press Upload again." });
   }
   if (!response.ok) throw await youtubeError(response);
-  const video = (await response.json().catch(() => null)) as { id?: unknown } | null;
+  const video = (await response.json().catch(() => null)) as { id?: unknown; snippet?: { channelId?: unknown } } | null;
   if (typeof video?.id !== "string") throw new AppError("youtube_failed", 502);
-  return { done: true, videoId: video.id };
+  const channelId = video.snippet?.channelId;
+  return { done: true, videoId: video.id, ...(typeof channelId === "string" && channelId ? { channelId } : {}) };
 }
 
 /** Sets the video's thumbnail. Returns a reason instead of failing: the video is already up. */
@@ -367,7 +371,14 @@ export function composeDetails(
 /* ------------------------------------------------------------------ */
 
 type RouteResult = { body: object; cookies?: string[]; status?: number };
-type RouteContext<Body> = { req: Request; body: Body; config: YouTubeConfig; account: YouTubeAccount };
+type RouteContext<Body> = {
+  req: Request;
+  body: Body;
+  config: YouTubeConfig;
+  account: YouTubeAccount;
+  /** The person signed in to the app. */
+  user: SessionUser | null;
+};
 
 /**
  * A YouTube route: rate limited, same-site only, signed-in only, and only
@@ -384,13 +395,13 @@ export function youtubeRoute<Body>(
       const limit = rateLimit(`youtube:${route}:${clientIp(req)}`, options.perMinute, 60_000);
       if (!limit.ok) throw new AppError("rate_limited", 429, { retryAfterSec: limit.retryAfterSec });
       assertSameOrigin(req);
-      await requireUser(req);
+      const user = await requireUser(req);
       const config = youtubeConfig();
       if (!config) throw new AppError("invalid_input", 404, { message: "YouTube uploads are not switched on for this app." });
       const account = await readAccount(req, config);
       if (options.needsAccount !== false && !account) throw new AppError("youtube_reconnect", 401);
       const body = await options.read(req);
-      const result = await run({ req, body, config, account: account as YouTubeAccount });
+      const result = await run({ req, body, config, account: account as YouTubeAccount, user });
       const headers = new Headers({ "Cache-Control": "no-store" });
       for (const cookie of result.cookies ?? []) headers.append("Set-Cookie", cookie);
       return Response.json(result.body, { status: result.status ?? 200, headers });

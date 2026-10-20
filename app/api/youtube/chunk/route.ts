@@ -1,11 +1,13 @@
 import { CHUNK_BYTES } from "@/lib/youtube";
 import { AppError } from "@/lib/server/appError";
-import { sendChunk, unseal, youtubeRoute } from "@/lib/server/youtube";
+import { seal, sendChunk, unseal, youtubeRoute } from "@/lib/server/youtube";
 
 export const maxDuration = 60;
 
 /** YouTube accepts pieces in multiples of 256 KB, except the last one. */
 const PIECE = 256 * 1024;
+/** How long the upload's receipt can be used to tell Video Insights about the video. */
+const RECEIPT_SEC = 86_400;
 
 type Piece = { upload: string | null; start: number; total: number; bytes: Uint8Array<ArrayBuffer> };
 
@@ -40,6 +42,13 @@ export const POST = youtubeRoute(
     if (typeof note?.s !== "string" || typeof note.at !== "string" || note.n !== body.total) {
       throw new AppError("youtube_failed", 410, { message: "This upload has expired. Please press Upload again." });
     }
-    return { body: await sendChunk(note.s, note.at, body.bytes, body.start, body.total, req.signal) };
+    const result = await sendChunk(note.s, note.at, body.bytes, body.start, body.total, req.signal);
+    if (!result.done) return { body: result };
+    // The channel's id itself is never sent to the browser.
+    if (!result.channelId) return { body: { done: true, videoId: result.videoId } };
+    // Proof that this browser has just uploaded this video to this channel, so it
+    // cannot ask for someone else's video to be tracked. Only the server can read it.
+    const receipt = await seal(config, "youtube-receipt", { v: result.videoId, c: result.channelId }, RECEIPT_SEC);
+    return { body: { done: true, videoId: result.videoId, receipt } };
   },
 );

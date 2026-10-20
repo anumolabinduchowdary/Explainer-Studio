@@ -21,7 +21,16 @@ import {
   youtubeConfig,
   type YouTubeConfig,
 } from "@/lib/server/youtube";
-import { CHUNK_BYTES, DetailsRequestSchema, YOUTUBE_LIMITS, sendVideo } from "@/lib/youtube";
+import { insightsConfig } from "@/lib/server/insights";
+import {
+  CHUNK_BYTES,
+  DetailsRequestSchema,
+  INSIGHTS_LIMITS,
+  TrackRequestSchema,
+  YOUTUBE_LIMITS,
+  insightsScenes,
+  sendVideo,
+} from "@/lib/youtube";
 
 const SECRET = "test-secret-0123456789-abcdefghijklmnopqrstuvwxyz";
 const ORIGIN = "https://studio.example.org";
@@ -34,7 +43,7 @@ const ENV = {
 };
 
 function setEnv(values: Record<string, string>) {
-  for (const name of ["AUTH_SECRET", "GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET", "YOUTUBE_UPLOADS", "YOUTUBE_PRIVACY", "YOUTUBE_CATEGORY_ID", "ALLOWED_EMAILS", "SMTP_HOST", "SMTP_USER", "SMTP_PASSWORD"]) {
+  for (const name of ["AUTH_SECRET", "GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET", "YOUTUBE_UPLOADS", "YOUTUBE_PRIVACY", "YOUTUBE_CATEGORY_ID", "ALLOWED_EMAILS", "SMTP_HOST", "SMTP_USER", "SMTP_PASSWORD", "INSIGHTS_URL", "INSIGHTS_SECRET"]) {
     vi.stubEnv(name, values[name] ?? "");
   }
 }
@@ -69,14 +78,14 @@ async function signedIn(extra: Record<string, string> = {}) {
   return { made, cookies: { [SESSION_COOKIE]: session, [YOUTUBE_COOKIE]: account } };
 }
 
-type Call = { url: string; method: string; headers: Record<string, string>; body: unknown };
+type Call = { url: string; method: string; headers: Record<string, string>; body: unknown; signal?: AbortSignal | null };
 function fakeGoogle(handler: (call: Call) => Response) {
   const calls: Call[] = [];
   vi.stubGlobal(
     "fetch",
     vi.fn(async (input: string | URL, init?: RequestInit) => {
       const headers = Object.fromEntries(new Headers(init?.headers).entries());
-      const call = { url: String(input), method: init?.method ?? "GET", headers, body: init?.body };
+      const call = { url: String(input), method: init?.method ?? "GET", headers, body: init?.body, signal: init?.signal };
       calls.push(call);
       return handler(call);
     }),
@@ -384,8 +393,8 @@ describe("the upload routes", () => {
 
   it("say whether a channel is connected, and only to someone signed in", async () => {
     const { cookies } = await signedIn();
-    expect(await (await post("status", { body: {}, cookies })).json()).toEqual({ connected: true, email: "channel@gmail.com", privacy: "public" });
-    expect(await (await post("status", { body: {}, cookies: { [SESSION_COOKIE]: cookies[SESSION_COOKIE] } })).json()).toEqual({ connected: false, privacy: "public" });
+    expect(await (await post("status", { body: {}, cookies })).json()).toEqual({ connected: true, email: "channel@gmail.com", privacy: "public", insights: false });
+    expect(await (await post("status", { body: {}, cookies: { [SESSION_COOKIE]: cookies[SESSION_COOKIE] } })).json()).toEqual({ connected: false, privacy: "public", insights: false });
     const anonymous = await post("status", { body: {} });
     expect(anonymous.status).toBe(401);
     expect((await anonymous.json()).error.code).toBe("signed_out");
@@ -505,7 +514,7 @@ describe("sending a video from the browser", () => {
     const progress: number[] = [];
     const done = sendVideo("note", video, { onProgress: (s) => progress.push(s) });
     await vi.runAllTimersAsync();
-    expect(await done).toBe("abcDEF12345");
+    expect(await done).toEqual({ videoId: "abcDEF12345" });
     // The second piece was tried again after a busy answer, and the third starts where YouTube stopped.
     expect(sent.map((item) => [Number(item.start), item.size])).toEqual([
       [0, CHUNK_BYTES],
@@ -524,3 +533,149 @@ describe("sending a video from the browser", () => {
   });
 });
 
+/* ------------------------------------------------------------------ */
+
+describe("telling Video Insights about an upload", () => {
+  const INSIGHTS = { INSIGHTS_URL: "https://insights.example.org/", INSIGHTS_SECRET: "insights-SECRET-0123456789" };
+  const studio = {
+    kind: "story",
+    title: "Playtime at Physio",
+    language: "Hindi",
+    health: true,
+    aiVoices: true,
+    durationSec: 42.5,
+    shape: "9:16",
+    scenes: [
+      { startSec: 0, text: "Meet Riya." },
+      { startSec: 12.3, text: "At the park" },
+    ],
+  };
+  const post = async (path: string, init: Parameters<typeof request>[1]) => {
+    const route = await import(`@/app/api/youtube/${path}/route`);
+    return (route.POST as (req: Request) => Promise<Response>)(request(`/api/youtube/${path}`, { method: "POST", ...init }));
+  };
+
+  it("gives the browser a receipt for the finished upload, without the channel's id", async () => {
+    const { cookies, made } = await signedIn();
+    const upload = await seal(made, "youtube-upload", { s: SESSION_URI, at: "t", n: 1000 }, 600);
+    fakeGoogle(() => Response.json({ id: "abcDEF12345", snippet: { channelId: "UCchannel-0123" } }, { status: 200 }));
+    expect(await sendChunk(SESSION_URI, "t", new Uint8Array(1000), 0, 1000)).toEqual({ done: true, videoId: "abcDEF12345", channelId: "UCchannel-0123" });
+
+    const res = await post("chunk", { body: new Uint8Array(1000), cookies, headers: { "x-upload": upload, "x-upload-start": "0", "x-upload-total": "1000" } });
+    const body = await res.json();
+    expect(body).toMatchObject({ done: true, videoId: "abcDEF12345", receipt: expect.any(String) });
+    expect(Object.keys(body).sort()).toEqual(["done", "receipt", "videoId"]);
+    expect(JSON.stringify(body)).not.toContain("UCchannel");
+    expect(await unseal(made, "youtube-receipt", body.receipt)).toMatchObject({ v: "abcDEF12345", c: "UCchannel-0123", aud: "youtube-receipt" });
+  });
+
+  it("only accepts a receipt made for that purpose, unchanged and in time", async () => {
+    const made = config();
+    const receipt = await seal(made, "youtube-receipt", { v: "abcDEF12345", c: "UCchannel-0123" }, 86_400);
+    expect(await unseal(made, "youtube-receipt", receipt)).toMatchObject({ v: "abcDEF12345", c: "UCchannel-0123" });
+    expect(await unseal(made, "youtube-upload", receipt)).toBeNull();
+    expect(await unseal(made, "youtube-account", receipt)).toBeNull();
+    const upload = await seal(made, "youtube-upload", { v: "abcDEF12345", c: "UCchannel-0123" }, 600);
+    expect(await unseal(made, "youtube-receipt", upload)).toBeNull();
+    expect(await unseal(made, "youtube-receipt", `${receipt.slice(0, -4)}AAAA`)).toBeNull();
+    expect(await unseal(made, "youtube-receipt", await seal(made, "youtube-receipt", { v: "a", c: "b" }, -10))).toBeNull();
+  });
+
+  it("refuses a missing, made-up, expired or borrowed receipt, before calling Insights", async () => {
+    const foreign = await seal(config({ ...INSIGHTS, AUTH_SECRET: "another-secret-another-secret-another-secret" }), "youtube-receipt", { v: "x", c: "y" }, 600);
+    const { cookies, made } = await signedIn(INSIGHTS);
+    const calls = fakeGoogle(() => Response.json({ reportUrl: "https://insights.example.org/r/1", tracking: true }));
+    const track = (receipt: unknown) => post("track", { body: { receipt, studio }, cookies });
+    expect((await track(undefined)).status).toBe(400);
+    expect((await track("made-up-receipt-made-up-receipt")).status).toBe(403);
+    expect((await track(await seal(made, "youtube-receipt", { v: "abcDEF12345", c: "UC1" }, -10))).status).toBe(403);
+    expect((await track(await seal(made, "youtube-upload", { v: "abcDEF12345", c: "UC1" }, 600))).status).toBe(403);
+    expect((await track(foreign)).status).toBe(403);
+    expect(calls).toHaveLength(0);
+    // And, like the other YouTube routes, only for someone signed in with a channel connected.
+    const receipt = await seal(made, "youtube-receipt", { v: "abcDEF12345", c: "UC1" }, 600);
+    expect((await post("track", { body: { receipt, studio } })).status).toBe(401);
+    expect((await post("track", { body: { receipt, studio }, cookies: { [SESSION_COOKIE]: cookies[SESSION_COOKIE] } })).status).toBe(401);
+  });
+
+  it("does nothing when Insights is not set up", async () => {
+    const { cookies, made } = await signedIn();
+    const calls = fakeGoogle(() => Response.json({ reportUrl: "https://insights.example.org/r/1", tracking: true }));
+    const receipt = await seal(made, "youtube-receipt", { v: "abcDEF12345", c: "UC1" }, 600);
+    const res = await post("track", { body: { receipt, studio }, cookies });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ reportUrl: null, tracking: false });
+    expect(calls).toHaveLength(0);
+    expect(insightsConfig()).toBeNull();
+    setEnv({ ...ENV, INSIGHTS_URL: INSIGHTS.INSIGHTS_URL });
+    expect(insightsConfig()).toBeNull();
+  });
+
+  it("posts the agreed details with the shared secret, and passes back the report's address", async () => {
+    const { cookies, made } = await signedIn(INSIGHTS);
+    const calls = fakeGoogle(() => Response.json({ reportUrl: "https://insights.example.org/videos/abcDEF12345", tracking: true }));
+    const receipt = await seal(made, "youtube-receipt", { v: "abcDEF12345", c: "UCchannel-0123" }, 600);
+    const res = await post("track", { body: { receipt, studio }, cookies });
+    expect(await res.json()).toEqual({ reportUrl: "https://insights.example.org/videos/abcDEF12345", tracking: true });
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).toMatchObject({ url: "https://insights.example.org/api/track", method: "POST" });
+    expect(calls[0].headers).toMatchObject({ authorization: "Bearer insights-SECRET-0123456789", "content-type": "application/json" });
+    expect(calls[0].signal).toBeInstanceOf(AbortSignal);
+    expect(JSON.parse(String(calls[0].body))).toEqual({
+      videoId: "abcDEF12345",
+      channelId: "UCchannel-0123",
+      uploadedBy: "owner@example.org",
+      studio,
+    });
+    // The status says so, so the panel knows to ask.
+    expect((await (await post("status", { body: {}, cookies })).json()).insights).toBe(true);
+  });
+
+  it("passes on only a report on Insights' own site, and never logs the secret or the answer", async () => {
+    const { cookies, made } = await signedIn(INSIGHTS);
+    const receipt = await seal(made, "youtube-receipt", { v: "abcDEF12345", c: "UC1" }, 600);
+    const track = async () => (await post("track", { body: { receipt, studio }, cookies })).json();
+    for (const elsewhere of ["https://insights.example.org.evil.example/r/1", "https://evil.example/https://insights.example.org/r", "javascript:alert(1)"]) {
+      fakeGoogle(() => Response.json({ reportUrl: elsewhere, tracking: true }));
+      expect(await track()).toEqual({ reportUrl: null, tracking: true });
+    }
+    fakeGoogle(() => Response.json({ error: "private details from Insights" }, { status: 500 }));
+    const failed = await post("track", { body: { receipt, studio }, cookies });
+    expect(failed.status).toBe(502);
+    fakeGoogle(() => new Response("not json"));
+    expect((await post("track", { body: { receipt, studio }, cookies })).status).toBe(502);
+    fakeGoogle(() => {
+      throw new TypeError("fetch failed");
+    });
+    expect((await post("track", { body: { receipt, studio }, cookies })).status).toBe(502);
+    const logged = vi.mocked(console.error).mock.calls.flat().join("\n");
+    expect(logged).toContain("api/youtube/track");
+    expect(logged).not.toMatch(/insights-SECRET|private details|UC1/);
+  });
+
+  it("only sends the secret over HTTPS, except to this computer", () => {
+    const check = (url: string) => {
+      setEnv({ INSIGHTS_URL: url, INSIGHTS_SECRET: "s" });
+      return insightsConfig()?.url ?? null;
+    };
+    expect(check("https://insights.example.org/")).toBe("https://insights.example.org");
+    expect(check("https://example.org/insights//")).toBe("https://example.org/insights");
+    expect(check("http://localhost:3001")).toBe("http://localhost:3001");
+    expect(check("http://insights.example.org")).toBeNull();
+    expect(check("https://user:pass@insights.example.org")).toBeNull();
+    expect(check("not a url")).toBeNull();
+  });
+
+  it("describes up to 40 scenes, each in a few words", () => {
+    const scenes = insightsScenes(
+      Array.from({ length: 45 }, (_, i) => ({ startSec: i * 3.14159, text: `  Scene ${i}\n${"word ".repeat(40)}` })),
+    );
+    expect(scenes).toHaveLength(INSIGHTS_LIMITS.scenes);
+    expect(scenes[1]).toMatchObject({ startSec: 3.1 });
+    expect(scenes.every((scene) => scene.text.length <= INSIGHTS_LIMITS.sceneText && !scene.text.includes("\n"))).toBe(true);
+    expect(scenes[0].text.startsWith("Scene 0 word")).toBe(true);
+    expect(insightsScenes([{ startSec: -1, text: "Short" }])).toEqual([{ startSec: 0, text: "Short" }]);
+    const parsed = TrackRequestSchema.safeParse({ receipt: "x".repeat(40), studio: { ...studio, scenes: Array(41).fill({ startSec: 0, text: "a" }) } });
+    expect(parsed.success).toBe(false);
+  });
+});
