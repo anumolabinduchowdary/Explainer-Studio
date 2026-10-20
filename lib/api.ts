@@ -33,7 +33,8 @@ export async function postJson<Schema extends z.ZodType>(
   schema: Schema,
   options: PostOptions = {},
 ): Promise<z.infer<Schema>> {
-  const { apiKey, timeoutMs = 70_000 } = options;
+  // The server decides how long a request may take (REQUEST_TIME_LIMIT_SEC); the browser waits longer than that.
+  const { apiKey, timeoutMs = 180_000 } = options;
 
   if (apiKey && !isSecureOrigin()) throw new ApiError("insecure_transport");
   if (typeof navigator !== "undefined" && navigator.onLine === false) {

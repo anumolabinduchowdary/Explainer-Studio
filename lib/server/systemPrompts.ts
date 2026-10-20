@@ -8,14 +8,14 @@ import {
   type Storyboard,
 } from "@/lib/schemas";
 import { PLAN_LIMITS, assemblePlan, type PlanRequest, type StoryKind, type StoryPlan } from "@/lib/plan";
-import { NARRATOR, STORY_LIMITS, VOICES } from "@/lib/story";
+import { EMOTIONS, NARRATOR, STORY_LIMITS, VOICES } from "@/lib/story";
 import { VISUALS } from "@/lib/visuals";
 
 const VISUAL_GUIDE = VISUALS.map((v) => `- ${v.id}: ${v.use}`).join("\n");
 
 const MEDIUM = `The finished video is drawn by an app: each scene shows a short heading, one or two sentences, optional bullet points and ONE simple flat illustration from a fixed library, with gentle animation. There is no voiceover, footage or photography, so the on-screen text must carry the whole message.`;
 
-const STORY_MEDIUM = `The finished video is a 2D cartoon drawn by an app. Each scene shows one background with up to five characters standing in it. The characters talk to each other in short spoken lines. Each line is spoken aloud by an AI voice and shown as large captions one or two words at a time. Characters stand and talk; they do not walk around, pick things up or change clothes, so everything important must be said in the dialogue.`;
+const STORY_MEDIUM = `The finished video is a 2D cartoon drawn by an app. Each scene shows one background with up to five characters standing in it. The characters talk to each other in short spoken lines. Each line is spoken aloud by an AI voice and shown as large captions one or two words at a time. Characters stand and talk; they do not walk around, pick things up or change clothes, so everything important must be said in the dialogue. The one exception is flight: a character can fly or leap through the air across a scene, which makes it an action scene (see flying).`;
 
 /**
  * Whether the video is about special parenting decides if it ends with the
@@ -72,7 +72,7 @@ export function buildPromptInput(request: BuildPromptRequest): string {
   const language = request.language?.trim();
   if (language) {
     lines.push(
-      `The video must be in ${language}. Everything viewers will read or hear must be in ${language}, even if the description is written in another language. State this in what you return (for a five-part prompt, in the constraints as "Language: ${language}"; for a story plan, as its language).`,
+      `The video must be in ${language}. Everything viewers will read or hear must be in ${language}, even if the description is written in another language. State this in what you return (for a five-part prompt, in the constraints as "Language: ${language}"; for a story plan, as its language). Descriptions for the illustrator ("look" and "style" in a story plan) are never shown to viewers and are always written in English.`,
     );
   }
   if (!allowsQuestions(request)) {
@@ -185,13 +185,14 @@ Characters (the most important part):
 - name: a short first name, or a title and name for professionals, fitting the region in the description. Every character has a different name.
 - role: who they are in a few words, for example "physiotherapist" or "seven-year-old girl who uses a wheelchair".
 - age: "child" (under about 12), "teen", "adult" or "older" (about 60 and over).
-- look: one or two sentences telling an illustrator exactly what to draw: age, build, skin tone, hair, clothes and their colours, glasses, and any mobility aid or assistive device. Make every character clearly different from the others (hair, clothes, build) so viewers can tell them apart. In a group, vary people: do not give everyone the same aid or the same disability unless the user says so. Do not describe the background, actions or feelings.
+- look: one or two sentences telling an illustrator exactly what to draw: age, build, skin tone, hair, clothes and their colours, glasses, and any mobility aid or assistive device. Make every character clearly different from the others (hair, clothes, build) so viewers can tell them apart. In a group, vary people: do not give everyone the same aid or the same disability unless the user says so. Do not describe the background, actions or feelings. Always write look in English, whatever language the video is in: only the illustrator reads it.
 - Never base a character on a real person, brand or existing cartoon character.
 - Show disabled characters as capable individuals. A mobility aid or device is simply part of how the character looks.
 
 Places:
 - Use exactly the setting the user names: "in a physiotherapy centre" means one place, a physiotherapy centre. Add a second or third place only if the user asks for one or the story clearly needs to move. At most ${PLAN_LIMITS.places}.
-- name: one to three words. look: one or two sentences describing the scenery only, with no people in it.
+- name: one to three words. look: one or two sentences describing the scenery only, with no people in it, always in English (only the illustrator reads it). Say the time of day and anything that sets the mood, such as trees, flowers, water, lamps or rain.
+- Each place is one moment: one time of day and one kind of weather or light, for example "in bright morning sunlight". Never describe two moments in one look (such as the day and a night celebration later). If the story needs the same place at another time, add it as a separate place, for example "Panchavati at night" with its lamps.
 
 Other parts:
 - message: one or two sentences on what viewers should understand, feel or do after watching.
@@ -200,8 +201,8 @@ Other parts:
 - language: the language the dialogue should be in, as a language name such as "English" or "Hindi". Default: the language the user wrote in.
 - tone: a few words, for example "warm and hopeful".
 - notes: anything else the user asked to include or avoid. Empty if there is nothing.
-- style: the drawing style the user asked for, in one sentence of plain words, for example "soft watercolour cartoon with pastel colours" or "bold comic-book cartoon with thick outlines". It is always a cartoon or illustration suitable for families, never a photograph or photorealistic. Never name an artist, studio, channel, brand or existing cartoon: describe the look instead. If the user did not ask for a particular look, return an empty string and the app's standard friendly 2D cartoon style is used.
-- Write the plan in plain, warm language, in the same language the user wrote in.
+- style: the drawing style the user asked for, in one sentence of plain words, for example "soft watercolour cartoon with pastel colours" or "bold comic-book cartoon with thick outlines". It is always a cartoon or illustration suitable for families, never a photograph or photorealistic. Never name an artist, studio, channel, brand or existing cartoon: describe the look instead. Write it in English. If the user did not ask for a particular look, return an empty string and the app's standard friendly 2D cartoon style is used.
+- Write the rest of the plan (names, roles, message, tone and notes) in plain, warm language, in the same language the user wrote in, or in the video's language when one is asked for. look and style are always in English.
 - exercises: leave empty unless this is a home exercise programme.
 ${SPECIAL_PARENTING_RULE}
 
@@ -301,11 +302,14 @@ ${VOICES.map((voice) => `    ${voice.id}: ${voice.hint}`).join("\n")}
 
 Scenes (3 to 8, fewer for a short video):
 - locationId: one of the place ids in the plan.
-- onStage: the ids of the characters visible in this scene, at most ${STORY_LIMITS.onStage}. Everyone who speaks in the scene must be listed.
+- onStage: the ids of the characters visible in this scene, at most ${STORY_LIMITS.onStage}. Everyone who speaks in the scene must be listed. Everyone listed is on screen for the whole scene, so list only the people who are really there from its first line to its last. When someone arrives or leaves, start a new scene, which may be at the same place: for example, a villain who leaves before a friend arrives in secret needs a scene of their own. Never put people on screen together who would not be together in the story.
+- flying: the ids of characters from onStage who fly or leap through the air during this scene, for example Hanuman leaping across the rooftops of Lanka or over the sea, or a bird. They swoop back and forth across the picture while the lines are said, and the camera follows them. Use it only when the story really has flight, usually for one character in a scene of their own; otherwise an empty list.
 - exercise: -1 (only home exercise programmes number their exercise scenes).
 - lines: 1 to 5 lines. speaker is a character id, or "${NARRATOR}" for a line no character says.
 - text: natural spoken language, at most 14 words per line, in the language the plan asks for. Write the way people really talk: contractions, short sentences, the odd "Oh!", "Hmm," or "You know what?". Avoid stiff, written-sounding phrases.
 - how: a few words in English telling the voice actor how to say this line, so it sounds like a real person and not a computer, for example "surprised, then laughing", "gently reassuring", "curious, thinking aloud", "proud and excited". Match the moment; do not repeat the same note on every line.
+- emotion: the feeling on the speaker's face while they say this line: one of ${EMOTIONS.join(", ")}. Use "neutral" for most ordinary lines and choose another only when the line clearly carries that feeling (happy at good news, sad when someone is taken away, surprised at a discovery, worried when unsure). Use "angry" rarely and only for a villain or a real wrong, never towards a child. Narrator lines are always "neutral". Keep each character to at most three different feelings in the story.
+- thought: true when the line is the speaker's inner thought, which the viewer hears but nobody in the scene does (their mouth stays closed while it plays); otherwise false. Use it when the plan asks for a character's thoughts, or rarely for a quiet private moment. Narrator lines are never thoughts.
 - Tell it as a small story that delivers the plan's message: open with a question or a moment the viewer recognises, explain through conversation, and close with an encouraging next step.
 - Length: lines are spoken at about 2.3 words per second, so the whole script should have about 2.3 words for every second of the plan's length.
 
@@ -321,12 +325,16 @@ const STORY_KIND_RULES: Record<StoryKind, string> = {
 - Be literal: no idioms, jokes or sarcasm. Short sentences, at most 12 words per line. One idea per scene.
 - Nothing frightening or surprising. End on a calm, positive note, such as feeling proud.
 - how: calm, gentle and unhurried for every line.
+- emotion: only "neutral" or "happy". Never sad, angry, surprised or worried faces in a Social Story.
+- flying: always an empty list.
 - 5 to 8 scenes, 1 to 3 lines each.`,
   exercises: `This is a home exercise programme. These rules come before the general ones:
 - Open with one short welcome scene, then one scene for each exercise in the plan, in order, with exercise set to its number (0 for the first), then one short encouraging closing scene. The welcome and closing scenes have exercise -1.
 - In each exercise scene the therapist says the exercise's name, explains the steps in plain spoken words without changing them, and says how much (the dose). If there is a caution, the therapist says it. The child may answer briefly.
 - Never add exercises, steps, doses or medical advice.
-- Lines may be up to 18 words here, since steps need it.`,
+- Lines may be up to 18 words here, since steps need it.
+- emotion: only "neutral" or "happy".
+- flying: always an empty list.`,
 };
 
 /** The writing instructions for a kind of cartoon video. */

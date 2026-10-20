@@ -1,9 +1,9 @@
-/** Turns a title into a safe file name, keeping letters from any language. */
+/** Turns a title into a safe file name, keeping letters from any language (with the vowel signs of scripts such as Telugu). */
 export function slugify(title: string, fallback = "explainer-video"): string {
   const slug = title
     .normalize("NFKC")
     .toLowerCase()
-    .replace(/[^\p{L}\p{N}]+/gu, "-")
+    .replace(/[^\p{L}\p{M}\p{N}]+/gu, "-")
     .replace(/^-+|-+$/g, "")
     .slice(0, 60);
   return slug || fallback;

@@ -73,20 +73,20 @@ const script = (changes: Partial<StoryFromPlanWire> = {}): StoryFromPlanWire => 
   ],
   scenes: [
     {
-      locationId: "l1", exercise: -1,
+      locationId: "l1", exercise: -1, flying: [],
       onStage: ["c1", "c2", "c3", "c4", "c5"],
       lines: [
-        { speaker: "c1", text: "Good morning, team! Ready to move?", how: "" },
-        { speaker: "c2", text: "Ready!", how: "" },
-        { speaker: "c3", text: "Me too!", how: "" },
+        { speaker: "c1", text: "Good morning, team! Ready to move?", how: "", emotion: "neutral", thought: false },
+        { speaker: "c2", text: "Ready!", how: "", emotion: "neutral", thought: false },
+        { speaker: "c3", text: "Me too!", how: "", emotion: "neutral", thought: false },
       ],
     },
     {
-      locationId: "l1", exercise: -1,
+      locationId: "l1", exercise: -1, flying: [],
       onStage: ["c1", "c4", "c5"],
       lines: [
-        { speaker: "c4", text: "Watch me stretch!", how: "" },
-        { speaker: "c5", text: "I can balance now.", how: "" },
+        { speaker: "c4", text: "Watch me stretch!", how: "", emotion: "neutral", thought: false },
+        { speaker: "c5", text: "I can balance now.", how: "", emotion: "neutral", thought: false },
       ],
     },
   ],
@@ -124,6 +124,12 @@ describe("the plan", () => {
     expect(PLAN_INSTRUCTIONS).toContain("Create exactly the people the user describes");
     expect(PLAN_INSTRUCTIONS).toContain(`at most ${PLAN_LIMITS.characters} characters`);
     expect(PLAN_INSTRUCTIONS).toContain("Never base a character on a real person");
+    // Descriptions for the illustrator stay in English, whatever language the video is in.
+    expect(PLAN_INSTRUCTIONS).toContain("Always write look in English");
+    expect(PLAN_INSTRUCTIONS).toContain("look and style are always in English");
+    expect(planInput({ description: "Ramayan", language: "Telugu" } as Parameters<typeof planInput>[0])).toContain(
+      "always written in English",
+    );
   });
 
   it("asks questions only when they are allowed", () => {
@@ -245,11 +251,11 @@ describe("story from a plan", () => {
         voices: [{ characterId: "c1", voice: "sage", voiceStyle: "calm" }],
         scenes: [
           {
-            locationId: "somewhere else", exercise: -1,
+            locationId: "somewhere else", exercise: -1, flying: [],
             onStage: ["c1", "c9", "A new nurse"],
             lines: [
-              { speaker: "c1", text: "Hello everyone.", how: "" },
-              { speaker: "A new nurse", text: "I was never in the plan.", how: "" },
+              { speaker: "c1", text: "Hello everyone.", how: "", emotion: "neutral", thought: false },
+              { speaker: "A new nurse", text: "I was never in the plan.", how: "", emotion: "neutral", thought: false },
             ],
           },
         ],
@@ -274,7 +280,7 @@ describe("story from a plan", () => {
       trimmed,
       script({
         voices: [{ characterId: "c5", voice: "shimmer", voiceStyle: "shy" }],
-        scenes: [{ locationId: "l1", exercise: -1, onStage: ["c1", "c5"], lines: [{ speaker: "c5", text: "Hello!", how: "" }] }],
+        scenes: [{ locationId: "l1", exercise: -1, flying: [], onStage: ["c1", "c5"], lines: [{ speaker: "c5", text: "Hello!", how: "", emotion: "neutral", thought: false }] }],
       }),
     );
     expect(story.characters.map((c) => c.name)).toEqual(["Ms. Kavya", "Diya", "Kabir", "Sara"]);
@@ -537,9 +543,9 @@ describe("Social Stories and home exercise programmes", () => {
       script({
         voices: [],
         scenes: [
-          { locationId: "l1", exercise: -1, onStage: ["c1", "c2"], lines: [{ speaker: "c1", text: "Hello Aarav! Ready?", how: "" }] },
-          { locationId: "l1", exercise: 0, onStage: ["c1", "c2"], lines: [{ speaker: "c1", text: "Bridge. Lift your hips. Ten times.", how: "" }] },
-          { locationId: "l1", exercise: -1, onStage: ["c1", "c2"], lines: [{ speaker: "c1", text: "Well done today!", how: "" }] },
+          { locationId: "l1", exercise: -1, flying: [], onStage: ["c1", "c2"], lines: [{ speaker: "c1", text: "Hello Aarav! Ready?", how: "", emotion: "neutral", thought: false }] },
+          { locationId: "l1", exercise: 0, flying: [], onStage: ["c1", "c2"], lines: [{ speaker: "c1", text: "Bridge. Lift your hips. Ten times.", how: "", emotion: "neutral", thought: false }] },
+          { locationId: "l1", exercise: -1, flying: [], onStage: ["c1", "c2"], lines: [{ speaker: "c1", text: "Well done today!", how: "", emotion: "neutral", thought: false }] },
         ],
       }),
     );

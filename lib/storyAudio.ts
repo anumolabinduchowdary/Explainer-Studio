@@ -1,8 +1,10 @@
 /**
- * Sound for cartoon stories: decodes voice clips, plays them in step with
- * the picture and feeds them into the recording.
+ * Sound for cartoon stories: decodes voice clips, plays them (and the
+ * background music and nature sounds, see lib/soundBed.ts) in step with the
+ * picture and feeds them into the recording.
  */
 
+import { evenLoudness } from "./loudness";
 import { tightenPauses } from "./pauses";
 
 /** Loudness is sampled this many times a second, to drive the mouth. */
@@ -52,17 +54,20 @@ function analyse(buffer: AudioBuffer): Pick<Clip, "envelope" | "speechStart" | "
   };
 }
 
-/** Re-renders a recording at a different speed, shifting its pitch with it. */
-/** The recording with its long silences shortened to a breath (see lib/pauses.ts), so the line flows. */
+/**
+ * The recording with its long silences shortened to a breath (see lib/pauses.ts), so the line
+ * flows, and brought to the same loudness as every other voice (see lib/loudness.ts).
+ */
 function flowing(context: BaseAudioContext, buffer: AudioBuffer): AudioBuffer {
   const channels = Array.from({ length: buffer.numberOfChannels }, (_, c) => buffer.getChannelData(c));
-  const tightened = tightenPauses(channels, buffer.sampleRate);
+  const tightened = evenLoudness(tightenPauses(channels, buffer.sampleRate), buffer.sampleRate);
   if (tightened === channels) return buffer;
   const result = context.createBuffer(tightened.length, tightened[0].length, buffer.sampleRate);
   tightened.forEach((data, c) => result.copyToChannel(data, c));
   return result;
 }
 
+/** Re-renders a recording at a different speed, shifting its pitch with it. */
 async function resample(buffer: AudioBuffer, rate: number): Promise<AudioBuffer> {
   const length = Math.max(1, Math.ceil(buffer.length / rate));
   const offline = new OfflineAudioContext(buffer.numberOfChannels, length, buffer.sampleRate);
@@ -76,6 +81,17 @@ async function resample(buffer: AudioBuffer, rate: number): Promise<AudioBuffer>
 
 export type ScheduledClip = { at: number; clip: Clip };
 
+/** A safety limiter: only the very loudest moments are held back, so voices and music together never distort. */
+function limiter(context: BaseAudioContext): DynamicsCompressorNode {
+  const node = context.createDynamicsCompressor();
+  node.threshold.value = -3;
+  node.knee.value = 2;
+  node.ratio.value = 20;
+  node.attack.value = 0.003;
+  node.release.value = 0.15;
+  return node;
+}
+
 /**
  * A small audio player built on the Web Audio API. While it is running it is
  * also the clock for the picture, so sound and animation cannot drift apart.
@@ -85,6 +101,7 @@ export class StoryAudio {
   private readonly output: GainNode;
   private readonly recordingTap: MediaStreamAudioDestinationNode;
   private playing: AudioBufferSourceNode[] = [];
+  private bedSource: AudioBufferSourceNode | null = null;
   private startedAt: number | null = null;
   private startTime = 0;
 
@@ -93,10 +110,12 @@ export class StoryAudio {
     // Start warming up straight away: the first start of a device's sound can take a moment.
     void this.context.resume();
     this.output = this.context.createGain();
-    this.output.connect(this.context.destination);
+    const safe = limiter(this.context);
+    this.output.connect(safe);
+    safe.connect(this.context.destination);
     // A second outlet carries the same sound into the recorded video.
     this.recordingTap = this.context.createMediaStreamDestination();
-    this.output.connect(this.recordingTap);
+    safe.connect(this.recordingTap);
   }
 
   /**
@@ -111,8 +130,11 @@ export class StoryAudio {
     return { buffer, duration: buffer.duration, ...analyse(buffer) };
   }
 
-  /** Starts sound from `time` seconds into the story. Call from a click or key press. */
-  start(time: number, schedule: ScheduledClip[]) {
+  /**
+   * Starts sound from `time` seconds into the story, with the music and nature
+   * sounds (`bed`) when they are ready. Call from a click or key press.
+   */
+  start(time: number, schedule: ScheduledClip[], bed: AudioBuffer | null = null) {
     this.stop();
     void this.context.resume();
     const base = this.context.currentTime + 0.05;
@@ -126,6 +148,30 @@ export class StoryAudio {
     }
     this.startedAt = base;
     this.startTime = time;
+    if (bed) this.playBed(bed, base, time);
+  }
+
+  private playBed(bed: AudioBuffer, when: number, from: number) {
+    try {
+      this.bedSource?.stop();
+    } catch {
+      // Already finished.
+    }
+    this.bedSource = null;
+    if (from >= bed.duration) return;
+    const source = this.context.createBufferSource();
+    source.buffer = bed;
+    source.connect(this.output);
+    source.start(when, from);
+    this.bedSource = source;
+    this.playing.push(source);
+  }
+
+  /** Brings in the music and nature sounds that finished preparing after playback started. */
+  joinBed(bed: AudioBuffer) {
+    const now = this.now();
+    if (now === null) return;
+    this.playBed(bed, this.context.currentTime + 0.05, now + 0.05);
   }
 
   stop() {
@@ -138,6 +184,7 @@ export class StoryAudio {
       source.disconnect();
     }
     this.playing = [];
+    this.bedSource = null;
     this.startedAt = null;
   }
 
@@ -161,16 +208,20 @@ export class StoryAudio {
   }
 
   /**
-   * Mixes every scheduled clip into one sound track covering the whole video,
-   * for building the downloadable file. Nothing is played aloud.
+   * Mixes every scheduled clip, and the music and nature sounds, into one
+   * sound track covering the whole video, for building the downloadable file.
+   * Nothing is played aloud.
    */
-  async mixdown(schedule: ScheduledClip[], duration: number): Promise<AudioBuffer> {
+  async mixdown(schedule: ScheduledClip[], duration: number, bed: AudioBuffer | null = null): Promise<AudioBuffer> {
     const rate = 48_000;
     const offline = new OfflineAudioContext(2, Math.max(1, Math.ceil(duration * rate)), rate);
-    for (const { at, clip } of schedule) {
+    const safe = limiter(offline);
+    safe.connect(offline.destination);
+    const sources = bed ? [{ at: 0, buffer: bed }, ...schedule.map(({ at, clip }) => ({ at, buffer: clip.buffer }))] : schedule.map(({ at, clip }) => ({ at, buffer: clip.buffer }));
+    for (const { at, buffer } of sources) {
       const source = offline.createBufferSource();
-      source.buffer = clip.buffer;
-      source.connect(offline.destination);
+      source.buffer = buffer;
+      source.connect(safe);
       source.start(at);
     }
     return offline.startRendering();

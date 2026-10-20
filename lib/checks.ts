@@ -16,7 +16,7 @@ export function checkFacts(
 ): Promise<FactCheckResult> {
   return postJson("/api/check/facts", { kind, language, texts }, FactCheckResponseSchema, {
     apiKey: apiKey || undefined,
-    timeoutMs: 75_000,
+    timeoutMs: 180_000,
   });
 }
 

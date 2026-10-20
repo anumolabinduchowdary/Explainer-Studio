@@ -8,6 +8,7 @@ import {
   DetailsResponseSchema,
   StartResponseSchema,
   ThumbnailResponseSchema,
+  TrackResponseSchema,
   YouTubeStatusSchema,
   sendVideo,
   studioLink,
@@ -22,7 +23,15 @@ import { Button } from "./ui";
 type Phase =
   | { step: "idle" }
   | { step: "working"; label: string; sent?: number; total?: number }
-  | { step: "done"; videoId: string; details: VideoDetails; thumbnail: string | null; thumbnailNote?: string }
+  | {
+      step: "done";
+      videoId: string;
+      details: VideoDetails;
+      thumbnail: string | null;
+      thumbnailNote?: string;
+      /** Video Insights' report on the video, once it has one. */
+      reportUrl?: string;
+    }
   | { step: "error"; error: ErrorInfo };
 
 const PRIVACY_WORDS = { public: "public", unlisted: "unlisted (only people with the link)", private: "private" } as const;
@@ -102,6 +111,30 @@ export function YouTubePanel({ video, info }: { video: Blob; info: YouTubeInfo }
     }
   };
 
+  /**
+   * Hands the posted video to Video Insights, in the background. It never holds
+   * up or spoils "Posted": any failure is simply left out.
+   */
+  const track = async (videoId: string, receipt: string) => {
+    try {
+      const studio = {
+        kind: info.kind,
+        title: info.title.slice(0, 200),
+        language: info.language,
+        health: info.health,
+        aiVoices: info.aiVoices,
+        durationSec: info.durationSec ?? 0,
+        shape: info.shape ?? "",
+        scenes: info.scenes ?? [],
+      };
+      const { reportUrl } = await postJson("/api/youtube/track", { receipt, studio }, TrackResponseSchema, { timeoutMs: 30_000 });
+      if (!reportUrl) return;
+      setPhase((current) => (current.step === "done" && current.videoId === videoId ? { ...current, reportUrl } : current));
+    } catch {
+      // Not shown: the video is posted either way.
+    }
+  };
+
   const upload = async () => {
     const controller = new AbortController();
     abortRef.current = controller;
@@ -121,7 +154,7 @@ export function YouTubePanel({ video, info }: { video: Blob; info: YouTubeInfo }
           follow: info.follow,
         },
         DetailsResponseSchema,
-        { apiKey: info.apiKey || undefined, timeoutMs: 75_000 },
+        { apiKey: info.apiKey || undefined, timeoutMs: 180_000 },
       );
       if (controller.signal.aborted) throw new DOMException("Cancelled", "AbortError");
 
@@ -135,7 +168,7 @@ export function YouTubePanel({ video, info }: { video: Blob; info: YouTubeInfo }
         StartResponseSchema,
         { timeoutMs: 30_000 },
       );
-      const videoId = await sendVideo(note, video, {
+      const { videoId, receipt } = await sendVideo(note, video, {
         signal: controller.signal,
         onProgress: (sent, total) => setPhase({ step: "working", label: "Uploading the video…", sent, total }),
       });
@@ -158,6 +191,7 @@ export function YouTubePanel({ video, info }: { video: Blob; info: YouTubeInfo }
         thumbnailNote = "No thumbnail could be made, so YouTube chose one from the video.";
       }
       setPhase({ step: "done", videoId, details, thumbnail, thumbnailNote });
+      if (status?.insights && receipt) void track(videoId, receipt);
     } catch (err) {
       if (controller.signal.aborted) {
         setPhase({ step: "idle" });
@@ -290,6 +324,18 @@ export function YouTubePanel({ video, info }: { video: Blob; info: YouTubeInfo }
           <p className="mt-1 text-sm text-muted">
             YouTube may take a few minutes to process the video before it can be watched.
           </p>
+          {phase.reportUrl && (
+            <p className="mt-1">
+              <a
+                href={phase.reportUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex min-h-11 items-center font-semibold text-brand-strong underline underline-offset-4"
+              >
+                See how this video is doing&nbsp;<span aria-hidden="true">→</span>
+              </a>
+            </p>
+          )}
           <div className="mt-3 flex flex-col gap-3 sm:flex-row">
             {phase.thumbnail && (
               // A data URL made in this page, so the plain img element is right here.

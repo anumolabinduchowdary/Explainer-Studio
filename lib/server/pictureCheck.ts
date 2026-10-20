@@ -20,9 +20,9 @@ problems: for each problem, one short instruction for the artist's redraw, for e
 
 const BACKGROUND_CHECK = `You check one background drawing made for a family cartoon against its description, before it is used in a video.
 
-The background is fine (matches: true) when it is a cartoon or illustration of the described place, with no people or animals in it, no text or watermarks, and an open floor area in the lower part where characters can stand. Small differences of style do not matter.
+The background is fine (matches: true) when it is a cartoon or illustration of the described place as one single, continuous scene at one time of day, with no people or animals in it, no text or watermarks, and an open floor area in the lower part where characters can stand. Small differences of style do not matter.
 
-Set matches to false only for clear problems: people or animals in it, text, the wrong kind of place, or a cluttered floor where nobody could stand.
+Set matches to false only for clear problems: people or animals in it, text, the wrong kind of place, a cluttered floor where nobody could stand, or a picture split into two or more panels or showing two different times of day (for example a daytime half and a night-time half).
 
 problems: for each problem, one short instruction for the artist's redraw. Empty when the background is fine.`;
 

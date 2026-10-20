@@ -230,20 +230,22 @@ describe("normalizeStory", () => {
     ).toThrow();
   });
 
-  it("asks the story writer for a strict JSON Schema, with a delivery note on every line", () => {
+  it("asks the story writer for a strict JSON Schema, with a delivery note and a feeling on every line", () => {
     const format = zodTextFormat(StoryFromPlanWireSchema, "cartoon_story");
     expect(format.strict).toBe(true);
     const schema = format.schema as {
       required: string[];
       additionalProperties: boolean;
-      properties: { scenes: { items: { properties: { lines: { items: { required: string[] } } } } } };
+      properties: { scenes: { items: { required: string[]; properties: { lines: { items: { required: string[] } } } } } };
     };
     expect(schema.additionalProperties).toBe(false);
     expect([...schema.required].sort()).toEqual(
       // No art style: the plan's drawing style, from the person's own description, is used instead.
       ["disclaimer", "isHealthTopic", "narratorVoice", "scenes", "title", "voices"].sort(),
     );
-    expect(schema.properties.scenes.items.properties.lines.items.required.sort()).toEqual(["how", "speaker", "text"]);
+    expect(schema.properties.scenes.items.properties.lines.items.required.sort()).toEqual(["emotion", "how", "speaker", "text", "thought"]);
+    // Every scene says who (if anyone) flies through it.
+    expect(schema.properties.scenes.items.required).toContain("flying");
     // The older, fuller shape is still accepted on the server side.
     expect(StoryWireSchema.safeParse(wire()).success).toBe(true);
   });

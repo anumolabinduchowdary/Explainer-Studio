@@ -49,11 +49,18 @@ export function normalizeStory(wire: StoryWire): Story {
       const lines: StoryLine[] = scene.lines
         .map((line) => {
           const how = clip(line.how ?? "", STORY_LIMITS.delivery);
+          const speaker = cast.renamed.get(line.speaker.trim()) ?? NARRATOR;
+          // The narrator is never on screen, so only characters show a feeling on their face.
+          const emotion = speaker !== NARRATOR && line.emotion && line.emotion !== "neutral" ? line.emotion : undefined;
+          // Only characters think; the narrator always speaks out loud.
+          const thought = speaker !== NARRATOR && line.thought === true;
           return {
             // Anything that is not a known character is read by the narrator.
-            speaker: cast.renamed.get(line.speaker.trim()) ?? NARRATOR,
+            speaker,
             text: clip(line.text, STORY_LIMITS.lineText),
             ...(how ? { how } : {}),
+            ...(emotion ? { emotion } : {}),
+            ...(thought ? { thought } : {}),
           };
         })
         .filter((line) => line.text.length > 0)
@@ -68,12 +75,17 @@ export function normalizeStory(wire: StoryWire): Story {
       for (const line of lines) {
         if (line.speaker !== NARRATOR && !onStage.includes(line.speaker)) line.speaker = NARRATOR;
       }
+      // Only characters who are in the scene can fly through it.
+      const flying = [
+        ...new Set((scene.flying ?? []).map((id) => cast.renamed.get(id.trim())).filter((id): id is string => Boolean(id))),
+      ].filter((id) => onStage.includes(id));
 
       return {
         id: "",
         locationId: places.renamed.get(scene.locationId.trim()) ?? places.items[0].id,
         ...(scene.card ? { card: scene.card } : {}),
         onStage,
+        ...(flying.length > 0 ? { flying } : {}),
         lines,
       };
     })

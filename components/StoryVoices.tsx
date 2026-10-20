@@ -57,6 +57,9 @@ type Props = {
   onRecordMissing: () => void;
   onStop: () => void;
   onToggleVoices: () => void;
+  /** Background music and nature sounds (see lib/soundBed.ts). */
+  musicOn: boolean;
+  onToggleMusic: () => void;
   onListen: (speaker: string) => void;
   onUseOwnKey: () => void;
 };
@@ -173,6 +176,22 @@ export function StoryVoices(props: Props) {
             Play the voices in the video
           </label>
         )}
+        <label className="flex min-h-11 cursor-pointer items-start gap-2">
+          <input
+            type="checkbox"
+            checked={props.musicOn}
+            onChange={props.onToggleMusic}
+            disabled={props.disabled}
+            className="mt-0.5 size-5 shrink-0 accent-brand"
+          />
+          <span>
+            Background music and nature sounds
+            <span className="block text-sm text-muted">
+              Soft tanpura and flute that follow each scene&apos;s mood, with the sounds of the place
+              (birds, crickets, water, rain). The music goes quieter whenever someone speaks.
+            </span>
+          </span>
+        </label>
         {ready > 0 && ready < needed.length && props.voicesOn && !batch && (
           <p className="rounded-xl bg-sun-soft px-3 py-2">
             Some lines have no voice yet. They will be silent, with captions only, until you

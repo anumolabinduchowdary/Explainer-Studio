@@ -86,6 +86,22 @@ export const VOICE_AGE_SETTINGS: Record<
 };
 export type VoiceId = (typeof VOICES)[number]["id"];
 export const VOICE_IDS = VOICES.map((voice) => voice.id) as [VoiceId, ...VoiceId[]];
+
+/**
+ * The feeling on a speaker's face for a line. A character's usual face is
+ * "neutral"; each other feeling a character uses is drawn once, from their
+ * standing picture, with only the face changed.
+ */
+export const EMOTIONS = ["neutral", "happy", "sad", "angry", "surprised", "worried"] as const;
+export type Emotion = (typeof EMOTIONS)[number];
+export const EMOTION_LABELS: Record<Emotion, string> = {
+  neutral: "Usual face",
+  happy: "Happy",
+  sad: "Sad",
+  angry: "Angry",
+  surprised: "Surprised",
+  worried: "Worried",
+};
 export const DEFAULT_NARRATOR_VOICE: VoiceId = "alloy";
 
 export const DEFAULT_ART_STYLE =
@@ -141,6 +157,13 @@ export const StoryLineSchema = z.object({
   text: z.string().trim().max(STORY_LIMITS.lineText),
   /** How the line is said, e.g. "surprised, then laughing". Helps the voice sound natural. */
   how: z.string().trim().max(STORY_LIMITS.delivery).optional(),
+  /** The feeling on the speaker's face while they say it. Missing means their usual face. */
+  emotion: z.enum(EMOTIONS).optional(),
+  /**
+   * A thought: the viewer hears it, but nobody in the scene does. The speaker's
+   * mouth stays closed and the caption looks different (soft pink, with a heart).
+   */
+  thought: z.boolean().optional(),
 });
 export type StoryLine = z.infer<typeof StoryLineSchema>;
 
@@ -165,6 +188,8 @@ export const StorySceneSchema = z.object({
   /** Home exercise programmes: the exercise shown in this scene. */
   card: ExerciseCardSchema.optional(),
   onStage: z.array(id).max(STORY_LIMITS.onStage),
+  /** Characters (from onStage) who fly through the scene, such as Hanuman leaping over Lanka. */
+  flying: z.array(id).max(STORY_LIMITS.onStage).optional(),
   lines: z.array(StoryLineSchema).min(1).max(STORY_LIMITS.linesPerScene),
 });
 export type StoryScene = z.infer<typeof StorySceneSchema>;
@@ -213,7 +238,16 @@ export const StoryWireSchema = z.object({
       locationId: z.string(),
       card: ExerciseCardSchema.optional(),
       onStage: z.array(z.string()),
-      lines: z.array(z.object({ speaker: z.string(), text: z.string(), how: z.string().optional() })),
+      flying: z.array(z.string()).optional(),
+      lines: z.array(
+        z.object({
+          speaker: z.string(),
+          text: z.string(),
+          how: z.string().optional(),
+          emotion: z.enum(EMOTIONS).optional(),
+          thought: z.boolean().optional(),
+        }),
+      ),
     }),
   ),
 });
@@ -225,7 +259,7 @@ export type StoryWire = z.infer<typeof StoryWireSchema>;
 
 export const StoryResponseSchema = z.object({ story: StorySchema });
 
-export const IMAGE_KINDS = ["character", "talking", "gesture", "explain", "background", "exercise"] as const;
+export const IMAGE_KINDS = ["character", "talking", "gesture", "explain", "expression", "flying", "background", "exercise"] as const;
 export type ImageKind = (typeof IMAGE_KINDS)[number];
 
 /** Largest reference picture (a base64 PNG data URL) accepted for the talking pose. */
@@ -239,6 +273,8 @@ export const ImageRequestSchema = z
     aspectRatio: z.enum(ASPECT_RATIOS),
     /** What the last attempt got wrong, so a redraw can correct it (from the picture check). */
     fix: z.string().trim().max(400).optional(),
+    /** For "expression": the feeling to show on the face. */
+    emotion: z.enum(EMOTIONS).optional(),
     /** For "talking", "gesture" and "explain": the picture to redraw from, as a PNG data URL. */
     reference: z
       .string()
@@ -247,9 +283,13 @@ export const ImageRequestSchema = z
       .optional(),
   })
   .refine(
-    (request) => !["talking", "gesture", "explain"].includes(request.kind) || Boolean(request.reference),
+    (request) => !["talking", "gesture", "explain", "expression", "flying"].includes(request.kind) || Boolean(request.reference),
     { message: "A reference picture is needed to redraw a character.", path: ["reference"] },
-  );
+  )
+  .refine((request) => request.kind !== "expression" || (request.emotion !== undefined && request.emotion !== "neutral"), {
+    message: "Say which feeling to draw.",
+    path: ["emotion"],
+  });
 export type ImageRequest = z.infer<typeof ImageRequestSchema>;
 
 export const ImageResponseSchema = z.object({
@@ -434,8 +474,42 @@ export const pictureKey = {
   /** A second gesture: both hands open, explaining, and that pose with the mouth open. */
   explain: (characterId: string) => `explain:${characterId}`,
   explainTalking: (characterId: string) => `explain-talking:${characterId}`,
+  /** The same character with a feeling on their face (happy, sad…), and that face talking. */
+  expression: (characterId: string, emotion: Emotion) => `expression:${emotion}:${characterId}`,
+  expressionTalking: (characterId: string, emotion: Emotion) => `expression-talking:${emotion}:${characterId}`,
+  /** The same character flying, for scenes they fly through. */
+  flying: (characterId: string) => `flying:${characterId}`,
   place: (locationId: string) => `place:${locationId}`,
 };
+
+/** Whether a character flies in any scene of the story (and so needs a flying picture). */
+export function fliesInStory(story: Story, characterId: string): boolean {
+  return story.scenes.some((scene) => scene.flying?.includes(characterId) && scene.onStage.includes(characterId));
+}
+
+/**
+ * The feeling on a character's face at line `lineIndex` of a scene (-1 is the
+ * scene's opening beat). Feelings last: a character keeps the feeling of their
+ * latest line that has one, while they listen and while they say lines that
+ * have none, and before their first such line they already show it (an angry
+ * king is angry from the moment the scene opens). Undefined is the usual face.
+ */
+export function feelingAt(scene: StoryScene, lineIndex: number, characterId: string): Emotion | undefined {
+  let latest: Emotion | undefined;
+  for (let l = 0; l <= Math.min(lineIndex, scene.lines.length - 1); l++) {
+    const line = scene.lines[l];
+    if (line.speaker === characterId && line.emotion) latest = line.emotion;
+  }
+  return latest ?? scene.lines.find((line) => line.speaker === characterId && line.emotion)?.emotion;
+}
+
+/** The feelings (other than the usual face) a character shows in the story, in a fixed order. */
+export function emotionsFor(story: Story, characterId: string): Emotion[] {
+  const used = new Set(
+    story.scenes.flatMap((scene) => scene.lines.filter((line) => line.speaker === characterId).map((line) => line.emotion)),
+  );
+  return EMOTIONS.filter((emotion) => emotion !== "neutral" && used.has(emotion));
+}
 
 /** Hands down: no gesture pose. */
 export const NO_GESTURE = -1;
@@ -527,7 +601,9 @@ export function lineVoice(
   story: Story,
   line: StoryLine,
 ): { voice: string; age: VoiceAge; style: string; delivery: string } {
-  const delivery = line.how?.trim() ?? "";
+  const how = line.how?.trim() ?? "";
+  // A thought is acted as an inner voice: soft and close, not said out loud to anyone.
+  const delivery = line.thought ? `an inner thought, soft and close, as if thinking to themselves${how ? `; ${how}` : ""}` : how;
   const character = story.characters.find((c) => c.id === line.speaker);
   if (!character) return { voice: story.narratorVoice, age: "adult", style: NARRATOR_STYLE, delivery };
   return { voice: character.voice, age: character.voiceAge, style: character.voiceStyle, delivery };

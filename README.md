@@ -82,6 +82,8 @@ the download with the built-in example.
 | `YOUTUBE_UPLOADS` | For the YouTube button | `on` shows **Upload to YouTube**. Needs Google sign-in. See [Posting to YouTube](#posting-to-youtube). |
 | `YOUTUBE_PRIVACY` | No | `public` (default), `unlisted` or `private`. |
 | `YOUTUBE_CATEGORY_ID` | No | YouTube category number. Default `27` (Education). |
+| `INSIGHTS_URL` | No | Where the Video Insights app runs, for example `https://insights.example.org`. Studio tells it about each YouTube upload. See [Video Insights](#video-insights). |
+| `INSIGHTS_SECRET` | With the URL | The same secret as in Video Insights' own settings. Server-side only. |
 
 ### Commands
 
@@ -119,8 +121,8 @@ shrinking people scene by scene (`storyCharacterScale` in `lib/storyRenderer.ts`
    the people and places you agreed to (see [The story plan](#the-story-plan)).
 3. Click **Draw the pictures**. For each character the image model draws a cut-out with a
    transparent background, then a second version with the mouth open. For each place it draws
-   a background. The app places the characters in the background, makes the speaker bounce
-   and move their mouth, and shows the words as large captions.
+   a background. The app places the characters in the background, moves the speaker's mouth,
+   glides the camera in on whoever is talking, and shows the words as large captions.
 4. Click **Record the voices**. Each line is spoken by an AI voice. The story gives every
    character a voice (grouped into women's and men's voices), an age and a manner of speaking
    ("cheerful, quick and proud"); change any of them and press **Listen** to compare. The speaker's mouth then follows the loudness of the
@@ -129,11 +131,78 @@ shrinking people scene by scene (`storyCharacterScale` in `lib/storyRenderer.ts`
 
 Things to know:
 
+- **Camera and movement.** Everyone stands perfectly still: nobody bounces, jumps, breathes,
+  nods or leans, and captions appear without growing or popping. Only faces, mouths and hands
+  change. At the start of each scene everyone is
+  shown together; when a character starts talking, the camera glides in on them over about
+  half a second (framing their head and shoulders), moves across to the next speaker, and
+  glides back out for the narrator. It never shows past the edge of the picture, so a
+  character at the very edge is shown larger but not centred. Scenes with an exercise card
+  stay wide, and calm Social Stories zoom in less and glide more slowly. Scenes fade softly
+  into each other (instead of a white flash), a gentle vignette draws the eye to the middle,
+  characters fade in where they stand, and each character keeps the same side of the screen
+  in every scene. The camera is worked out from the time alone (`storyCamera` in
+  `lib/storyRenderer.ts`), so the preview and the downloaded video match.
+- **Opening title.** The story's name fades in at the top of the first scene for about three
+  seconds, with a small gold ornament under it (not over an exercise card, and not on the
+  YouTube thumbnail, which adds its own).
+- **Mood light and living backgrounds.** Each scene gets a soft wash of light that matches
+  it: warm for happy scenes, cool for sad ones, deeper and darker for tense ones, orange at
+  dusk and blue at night, darker towards the edges. Lamps, diyas and candles make it flicker
+  very gently. Small touches move behind the characters: fireflies at night, leaves (or
+  petals in a garden) drifting down by day, specks of dust in the light indoors, and rain or
+  snow when the place has it. They are read from each place's name and description, so the
+  AI is not asked for anything extra. Calm stories keep the light but have no moving touches
+  or flicker (`lib/storyMood.ts`, `lib/storyAtmosphere.ts`).
+- **Background music and nature sounds.** The app makes its own music, so there is nothing to
+  license or pay for: a tanpura drone, and short bansuri-like flute phrases in a raga-like
+  scale that follows each scene's mood (bright by day, evening-like at dusk and night, tender
+  when sad, darker when tense). Each place has its own sounds: birds and rustling leaves in a
+  forest, crickets at night, a river or waves, rain, a quiet room, a temple bell, a distant
+  town, a light wind outdoors. The music goes quieter whenever someone speaks and comes back
+  up between lines, and fades out at the end. It is rendered once in the background, about
+  150 times faster than real time, so making the video does not wait for it. Switch it off
+  under **Voices** with "Background music and nature sounds" (`lib/soundBed.ts`).
+- **Even voice loudness.** Each voice clip is brought to the same speaking level (ignoring the
+  silent gaps, and never so loud that it distorts), so no character sounds much louder or
+  softer than the others, whichever voice service recorded them (`lib/loudness.ts`).
+- **Facial expressions.** The story writer gives every line a feeling: the usual face, happy,
+  sad, angry, surprised or worried. Most lines keep the usual face; "angry" is kept for a
+  villain or a real wrong and never aimed at a child, and Social Stories and exercise
+  programmes use only the usual face and happy. Each feeling a character actually shows is
+  drawn once, from their standing picture with only the face changed, plus the same face
+  talking (2 pictures per feeling, so a story usually needs 2 to 6 more pictures). Feelings
+  last: a character keeps the face of their latest feeling in the scene while others talk and
+  while they say lines with no feeling of their own, and shows it from the moment the scene
+  opens (an angry king is angry before he speaks). Their hands stay still while they show a
+  feeling. Change any line's feeling under **Face** in the scene editor; a new feeling is
+  drawn the next time you draw the missing pictures (`feelingAt` in `lib/story.ts`).
+- **Thought lines.** Tick **A thought** on a line in the scene editor (or the story writer
+  does it when the plan asks for a character's thoughts): the viewer hears it, but nobody in
+  the scene does. The speaker's mouth stays closed and their hands stay still, the caption is
+  soft pink and leans, with a small heart, and the voice is asked to sound like an inner voice.
+  Screen readers hear "(thinking)".
+- **Flying action scenes.** Under **Who flies through this scene** in the scene editor (or
+  when the story writer marks it, for example Hanuman leaping over Lanka), a character flies
+  instead of standing. They get one more picture, flying (a wheelchair user stays seated and
+  the chair soars like a chariot), and swoop back and forth across the picture in fast leaps.
+  The camera follows them a little closer in, with a motion blur behind them, speed streaks,
+  thin film bars, dhol-style drums and a whoosh each time they pass. In a burning place,
+  flames burst up one by one where they fly, with a flash and a boom as each catches, embers
+  rush past the camera and a flame streams behind the flyer (`lib/flight.ts`).
+- **Save cast / Load cast (for a series).** Under **Your cast**, **Save cast** puts every
+  picture of every character (standing, talking, gestures, faces, flying), their voices, the
+  places and the drawing style in one file on your computer; nothing is uploaded. In the next
+  story, **Load cast** reads it, matches each saved character to one in the story (by name, or
+  by a description that is mostly the same; you can change who is who), and uses the saved
+  pictures as they are. They were checked when first drawn, so they are not checked or drawn
+  again, and only new places and new faces need drawing. A background saved for another shape
+  of video is drawn again (`lib/cast.ts`, `components/CastPanel.tsx`).
 - **Hand gestures**: with "Hand gestures while talking" ticked (the default), each character
   is also drawn with a hand raised and with both hands open, each with the mouth open too.
   While someone speaks they move between these poses in stretches of a second or two that
   start with a word, blending smoothly from one pose to the next, with rests in between. The
-  people listening nod along. The pattern is fixed for each line, so the preview and the
+  pattern is fixed for each line, so the preview and the
   downloaded video match. Untick it for the whole story, or per character, if a gesture
   drawing looks wrong.
 - **Cost**: each character needs 6 pictures with gestures (2 without) and each background 1,
@@ -145,7 +214,7 @@ Things to know:
   of a wheelchair or walker. Edit the description and redraw until it is right.
 - **Characters can drift.** Each picture is drawn separately from the same description, so the
   mouth-open version can differ slightly from the first. If it looks wrong, untick
-  "Mouth moves when talking" for that character; they will bounce while speaking instead.
+  "Mouth moves when talking" for that character; the camera still shows who is speaking.
 - **Pictures are not saved.** They live in the page's memory, like everything else. Reloading
   the page clears them, and they would need to be drawn (and paid for) again.
 - **Say that the voices are AI.** OpenAI requires a clear statement to listeners that the
@@ -410,6 +479,33 @@ Optional settings: `YOUTUBE_PRIVACY` (`public`, the default, or `unlisted` or `p
 - **Large videos** are sent in 4 MB pieces, so they fit the hosting platform's request size
   limit. A piece that fails is tried again; keep the page open until it says "Posted".
 
+## Video Insights
+
+Video Insights is a separate app, in the folder `insights/`. It follows each video Studio
+posts to YouTube and shows a report on whether it is doing better than the channel's usual
+videos, and why.
+
+Studio's part is small. After an upload, it tells Insights which video was posted (its YouTube
+id and channel), who posted it (the email they signed in to Studio with) and what is in it: the
+title, language, length, shape, whether it has the health disclaimer and AI voices, and when
+each scene starts, with a few of its words. This happens in the background, so it never holds
+up or spoils the upload. When Insights answers with a report, the YouTube panel shows **See how
+this video is doing →**.
+
+Two settings switch it on:
+
+- `INSIGHTS_URL`: where Insights runs, for example `https://insights.example.org`. It must
+  start with `https://` (or `http://localhost` on your own computer).
+- `INSIGHTS_SECRET`: a long random value, **the same value** as in Insights' own settings. It
+  proves to Insights that the message comes from Studio. Read on the server only and never
+  logged.
+
+Leave either blank and Studio never contacts Insights. Studio only reports videos that the
+same browser has just uploaded: with each upload the server gives the browser an encrypted
+receipt (it lasts a day), and it refuses to report any video without one.
+
+How to set up the Insights app itself is in [insights/README.md](insights/README.md).
+
 ## How the video file is made
 
 **Create video** builds the file one frame at a time: each frame is drawn at its exact moment
@@ -417,7 +513,8 @@ and encoded, and the voices are mixed into a single sound track. Nothing depends
 the device is or whether the screen stays on, so the picture cannot freeze while the sound
 carries on.
 
-- The result is a standard MP4: H.264 picture at a steady 30 frames a second, AAC sound, with
+- The result is a standard MP4: H.264 picture at a steady 25 frames a second (the standard in
+  India, and a sixth fewer frames to build than 30), AAC sound, with
   its index at the front. Phones, WhatsApp, Instagram and YouTube all accept this kind.
 - It is usually faster than the video's length. On the development laptop a 2-minute video
   took about 20 seconds; phones will be slower.
@@ -620,8 +717,9 @@ The story follows the usual Social Story guidance:
   as lines that suggest an action.
 - It uses positive, literal words: no idioms, jokes, "always" or "never", and at most 12
   words per line. It ends on a calm, positive note.
-- **Calm, sensory-friendly** is on: no flash between scenes, captions appear without popping,
-  movement is gentler (about 40%), and there is an extra half-second pause after every line.
+- **Calm, sensory-friendly** is on: no flash between scenes, the camera zooms in less and
+  glides more slowly, no fireflies, leaves or other moving touches, softer music and nature
+  sounds, and an extra half-second pause after every line.
   The plan step has a **Calm, sensory-friendly** checkbox, so any cartoon story can use it.
 
 ### Home exercise programmes
@@ -789,6 +887,7 @@ app/
   api/voices/route.ts      The voices that can be chosen for a story's language
   api/translate/route.ts   A finished video's words in another language
   api/youtube/…            YouTube: connect, upload in pieces, thumbnail, title and description
+  api/youtube/track/…      Tells the Video Insights app about each upload
   api/check/facts/…        Checks and fixes a script's facts and wording; picks trusted sources
   api/check/picture/…      Compares a drawing with its description
   api/transcribe/route.ts  Write down a spoken description
@@ -807,6 +906,7 @@ components/
   VideoStep.tsx            Explainer step 3: player, scene editor, recording
   StoryStep.tsx            Cartoon step 3: draws pictures, player, recording
   StoryPictures.tsx        Characters and backgrounds: describe, draw, redraw
+  CastPanel.tsx            Save cast / Load cast: keep a series' characters and places in a file
   StoryVoices.tsx          Voices: choose, listen, record the lines
   StoryScenes.tsx          Cartoon scenes: who is on screen and what they say
   Player.tsx               Canvas player and controls (shared by both sections)
@@ -823,10 +923,15 @@ lib/
   renderer.ts              Draws any moment of a storyboard on a canvas
   story.ts                 Cartoon story format, timing and caption rules
   storyRenderer.ts         Draws any moment of a cartoon story on a canvas
+  storyMood.ts             Reads each scene's time of day, place and feeling
+  storyAtmosphere.ts       Mood light and moving touches (fireflies, leaves, rain, spreading fire)
+  flight.ts                Flying characters: the swooping path the picture, camera and sound share
+  cast.ts                  The saved-cast file: building, reading and matching it to a story
   voices.ts                Voice lists, and giving each character a voice of the right gender and age
   gemini.ts                Gemini's voices (the server part, which speaks each line, is in server/gemini.ts)
   sarvam.ts                Sarvam AI's Indian voices and languages (the server part is in server/sarvam.ts)
   pauses.ts                Shortens long pauses in recorded lines so they flow
+  loudness.ts              Brings every voice clip to the same loudness
   languages.ts             The language list, and which languages OpenAI's voices speak well
   translate.ts             Taking a video's words out for translation and putting them back
   disclaimer.ts            The health disclaimer in each language, followed by the English
@@ -836,6 +941,7 @@ lib/
   checks.ts                Runs the fact and picture checks from the browser
   storyPictures.ts         Requests pictures and voices and prepares pictures for drawing
   storyAudio.ts            Plays voice clips in step with the picture and feeds the recording
+  soundBed.ts              Makes the background music and nature sounds for a story
   endCard.ts               The closing QR card added to the end of every video
   exportVideo.ts           Builds the MP4 frame by frame (WebCodecs + Mediabunny)
   recorder.ts              Fallback for older browsers: records the player live
@@ -843,6 +949,7 @@ lib/
   auth.ts                  Sign-in: what the browser sends, and the messages it shows
   server/                  OpenAI client, system prompts, validation, rate limit
   server/auth/             Sign-in on the server: settings, sessions, email codes, Google
+  server/insights.ts       Telling the Video Insights app about each upload
 examples/                  The worked example
 tests/                     Unit tests
 ```

@@ -65,6 +65,8 @@ export type FrameOptions = {
   scratch?: HTMLCanvasElement | null;
   /** When true, entrance animations are skipped and scenes are shown fully arrived (used while paused). */
   settled?: boolean;
+  /** Story videos: false leaves out the opening title (thumbnails add their own). */
+  title?: boolean;
 };
 
 /* ------------------------------------------------------------------ */

@@ -146,7 +146,7 @@ export default function Studio({ kind, active, apiKey, youtubeEnabled, onUseOwnK
     setBusy("result");
     setBusyLabel("");
     setError(null);
-    const options = { apiKey: apiKey || undefined, timeoutMs: 75_000 };
+    const options = { apiKey: apiKey || undefined, timeoutMs: 180_000 };
     try {
       if (kind === "story" && plan) {
         const result = await postJson("/api/story", { plan }, StoryResponseSchema, options);

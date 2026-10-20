@@ -5,6 +5,7 @@ import {
   STORY_LIMITS,
   VOICE_AGES,
   VOICE_AGE_SETTINGS,
+  EMOTIONS,
   VOICE_IDS,
   type VoiceAge,
 } from "./story";
@@ -176,7 +177,11 @@ export const StoryFromPlanWireSchema = z.object({
       /** Home exercise programmes: which exercise this scene shows (0 for the first), or -1 for none. */
       exercise: z.number(),
       onStage: z.array(z.string()),
-      lines: z.array(z.object({ speaker: z.string(), text: z.string(), how: z.string() })),
+      /** Characters (from onStage) who fly through the scene; usually none. */
+      flying: z.array(z.string()),
+      lines: z.array(
+        z.object({ speaker: z.string(), text: z.string(), how: z.string(), emotion: z.enum(EMOTIONS), thought: z.boolean() }),
+      ),
     }),
   ),
 });

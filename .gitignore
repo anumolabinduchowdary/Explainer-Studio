@@ -46,3 +46,9 @@ next-env.d.ts
 
 # reference videos (not ours to publish)
 *.mov
+
+# Videos made with the app and saved here, too large to keep in git
+/videos/
+
+# Story scripts and series material (private)
+/series/

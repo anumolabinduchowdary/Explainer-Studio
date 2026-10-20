@@ -3,6 +3,7 @@ import OpenAI, { OpenAIError } from "openai";
 import { zodTextFormat } from "openai/helpers/zod";
 import type { z } from "zod";
 import { AppError } from "./appError";
+import { requestTimeLimitMs } from "./timeLimit";
 
 /** Model names always come from the environment, never from code. */
 export function textModel(): string {
@@ -28,7 +29,8 @@ function reasoningEffort(): ReasoningEffort | undefined {
 }
 
 export function createClient(apiKey: string): OpenAI {
-  return new OpenAI({ apiKey, maxRetries: 1, timeout: 50_000 });
+  // Each call to OpenAI ends a little before the request's own time limit, so the app can still answer.
+  return new OpenAI({ apiKey, maxRetries: 1, timeout: Math.max(10_000, requestTimeLimitMs() - 5_000) });
 }
 
 /** The slice of the SDK this module uses; lets tests pass in a fake. */

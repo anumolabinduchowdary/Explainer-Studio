@@ -11,9 +11,12 @@ import { assemblePlan, type StoryPlan } from "@/lib/plan";
 import { suggestCaption } from "@/lib/share";
 import { dimensionsFor } from "@/lib/renderer";
 import {
+  EMOTIONS,
   NARRATOR,
   characterName,
   clipKey,
+  emotionsFor,
+  fliesInStory,
   estimateLine,
   lineStarts,
   lineVoice,
@@ -26,6 +29,7 @@ import {
   type TimeLine,
 } from "@/lib/story";
 import { StoryAudio, isMouthOpen, type Clip, type ScheduledClip } from "@/lib/storyAudio";
+import { bedKey, planSoundBed, renderSoundBed, type BedPlan } from "@/lib/soundBed";
 import {
   loadSprite,
   referencePng,
@@ -48,13 +52,23 @@ import { thumbnailFrom } from "@/lib/thumbnail";
 import { checkDrawing, checkFacts, textsKey, type FactsState } from "@/lib/checks";
 import type { PictureCheck } from "@/lib/quality";
 import { TranslateResponseSchema, storyTexts, withStoryTexts, type Texts } from "@/lib/translate";
-import type { YouTubeInfo } from "@/lib/youtube";
+import { insightsScenes, type YouTubeInfo } from "@/lib/youtube";
 import { useCanvasFonts } from "@/lib/useRenderAssets";
 import { ExportPanel } from "./ExportPanel";
 import { LanguagePanel } from "./LanguagePanel";
 import { QualityPanel, type PictureSummary, type VoiceSummary } from "./QualityPanel";
 import { Player, type DrawFunction, type PlayerHandle, type Transport } from "./Player";
 import { StoryPictures, cardScenes, characterNeedsDrawing, needsDrawing, pictureSource } from "./StoryPictures";
+import { CastPanel, type CastChoice } from "./CastPanel";
+import {
+  MAX_CAST_FILE_BYTES,
+  buildCastFile,
+  characterPoses,
+  matchCast,
+  parseCastFile,
+  storyWithCast,
+  type CastFile,
+} from "@/lib/cast";
 import { StoryScenes } from "./StoryScenes";
 import { StoryVoices, clipKeysNeeded, type ClipMap, type ClipState } from "./StoryVoices";
 import { VideoDetails } from "./VideoDetails";
@@ -112,7 +126,8 @@ export function StoryStep(props: Props) {
   const headingRef = useRef<HTMLHeadingElement>(null);
   const playerRef = useRef<PlayerHandle>(null);
   const audioRef = useRef<StoryAudio | null>(null);
-  const hasVoicesRef = useRef(false);
+  // Whether the video has any sound: voices, or the music and nature sounds.
+  const hasSoundRef = useRef(false);
 
   /** The audio player is created on first use, which must be inside a click (browser rule). */
   const getAudio = useCallback(() => (audioRef.current ??= new StoryAudio()), []);
@@ -122,9 +137,9 @@ export function StoryStep(props: Props) {
     playerRef,
     useMemo(
       () => ({
-        stream: () => (hasVoicesRef.current ? getAudio().recordingStream() : null),
+        stream: () => (hasSoundRef.current ? getAudio().recordingStream() : null),
         prepare: async () => {
-          if (hasVoicesRef.current) await getAudio().whenRunning();
+          if (hasSoundRef.current) await getAudio().whenRunning();
         },
       }),
       [getAudio],
@@ -146,6 +161,7 @@ export function StoryStep(props: Props) {
   const [pictureBatch, setPictureBatch] = useState<Batch>(null);
   const [clips, setClips] = useState<ClipMap>({});
   const [voicesOn, setVoicesOn] = useState(true);
+  const [musicOn, setMusicOn] = useState(true);
   const [voiceBatch, setVoiceBatch] = useState<Batch>(null);
   const [listeningTo, setListeningTo] = useState<string | null>(null);
   const [activeIndex, setActiveIndex] = useState(0);
@@ -218,28 +234,16 @@ export function StoryStep(props: Props) {
   const scheduleRef = useRef(schedule);
   useEffect(() => {
     scheduleRef.current = schedule;
-    hasVoicesRef.current = hasVoices;
     // The sound already playing was timed for the old script, so stop and let the user press play again.
     if (hasVoices) playerRef.current?.pause();
   }, [schedule, hasVoices]);
 
-  const transport = useMemo<Transport | undefined>(
-    () =>
-      hasVoices
-        ? {
-            start: (time) => getAudio().start(time, scheduleRef.current),
-            stop: () => audioRef.current?.stop(),
-            now: () => audioRef.current?.now() ?? null,
-          }
-        : undefined,
-    [hasVoices, getAudio],
-  );
-
   /* ---------------- What the player draws ---------------- */
 
+  // The title is drawn at the start of the video, so its letters need the font too.
   const allText = useMemo(
-    () => story.scenes.flatMap((scene) => scene.lines.map((line) => line.text)).join(" "),
-    [story.scenes],
+    () => [story.title, ...story.scenes.flatMap((scene) => scene.lines.map((line) => line.text))].join(" "),
+    [story.title, story.scenes],
   );
   const fonts = useCanvasFonts(allText);
 
@@ -267,7 +271,14 @@ export function StoryStep(props: Props) {
           if (pose) gestures.push({ idle: pose, talk: mouth ? ready(talking) : undefined });
         }
       }
-      characters.set(character.id, { idle, talk, gestures });
+      // The faces for each feeling that has been drawn.
+      const expressions: NonNullable<CharacterSprites["expressions"]> = new Map(
+        EMOTIONS.flatMap((emotion) => {
+          const face = emotion === "neutral" ? undefined : ready(pictureKey.expression(character.id, emotion));
+          return face ? [[emotion, { idle: face, talk: mouth ? ready(pictureKey.expressionTalking(character.id, emotion)) : undefined }] as const] : [];
+        }),
+      );
+      characters.set(character.id, { idle, talk, gestures, expressions, flying: ready(pictureKey.flying(character.id)) });
     }
     for (const location of story.locations) {
       const sprite = ready(pictureKey.place(location.id));
@@ -327,16 +338,84 @@ export function StoryStep(props: Props) {
     [dims.width, dims.height, duration, draw, describe, endCardOn, endCardImage],
   );
 
+  /* ---------------- Music and nature sounds ---------------- */
+
+  // Made by the app from the story (see lib/soundBed.ts), and quieter whenever someone speaks.
+  const bedPlan = useMemo<BedPlan | null>(
+    () => (musicOn ? planSoundBed(story, timeLine, video.duration, hasVoices) : null),
+    [musicOn, story, timeLine, video.duration, hasVoices],
+  );
+  const hasSound = hasVoices || bedPlan !== null;
+  const bedPlanRef = useRef(bedPlan);
+  const playingRef = useRef(false);
+  const bedRef = useRef<{ key: string; ready: AudioBuffer | null; buffer: Promise<AudioBuffer | null> } | null>(null);
+  /** The music for a plan: rendered once (faster than real time) and kept until the story changes. */
+  const bedFor = useCallback((plan: BedPlan) => {
+    const key = bedKey(plan);
+    if (bedRef.current?.key !== key) {
+      const entry: { key: string; ready: AudioBuffer | null; buffer: Promise<AudioBuffer | null> } = {
+        key,
+        ready: null,
+        buffer: Promise.resolve(null),
+      };
+      entry.buffer = renderSoundBed(plan)
+        .then((buffer) => (entry.ready = buffer))
+        .catch(() => null);
+      bedRef.current = entry;
+    }
+    return bedRef.current;
+  }, []);
+  useEffect(() => {
+    bedPlanRef.current = bedPlan;
+    hasSoundRef.current = hasSound;
+    if (!bedPlan) return;
+    // Prepared in the background soon after any change, so it is ready before Play or the download.
+    const timer = setTimeout(() => void bedFor(bedPlan), 400);
+    return () => clearTimeout(timer);
+  }, [bedPlan, hasSound, bedFor]);
+
+  const transport = useMemo<Transport | undefined>(
+    () =>
+      hasSound
+        ? {
+            start: (time) => {
+              playingRef.current = true;
+              const plan = bedPlanRef.current;
+              const entry = plan ? bedFor(plan) : null;
+              getAudio().start(time, scheduleRef.current, entry?.ready ?? null);
+              // Still being prepared: the music joins in as soon as it is ready.
+              if (entry && !entry.ready) {
+                void entry.buffer.then((buffer) => {
+                  if (buffer && playingRef.current && bedRef.current === entry) audioRef.current?.joinBed(buffer);
+                });
+              }
+            },
+            stop: () => {
+              playingRef.current = false;
+              audioRef.current?.stop();
+            },
+            now: () => audioRef.current?.now() ?? null,
+          }
+        : undefined,
+    [hasSound, getAudio, bedFor],
+  );
+
   useEffect(() => {
     exportJob.current = async () => {
       if (!video.draw) return null;
+      const audio = hasSound ? getAudio() : null;
       return {
         width: dims.width,
         height: dims.height,
         duration: video.duration,
         draw: video.draw,
-        // All the voice clips, placed at their moments, as one sound track.
-        sound: hasVoices ? await getAudio().mixdown(schedule, video.duration) : null,
+        // All the voice clips, placed at their moments, with the music and nature sounds, as one
+        // sound track. It is mixed while the first frames are being built, so nobody waits for it.
+        sound: audio
+          ? (bedPlan ? bedFor(bedPlan).buffer : Promise.resolve(null)).then((bed) =>
+              audio.mixdown(schedule, video.duration, bed),
+            )
+          : null,
       };
     };
   });
@@ -351,6 +430,10 @@ export function StoryStep(props: Props) {
   );
 
   /* ---------------- Pictures ---------------- */
+
+  // A saved cast file that was opened, waiting for the person to confirm who is who.
+  const [castOffer, setCastOffer] = useState<{ cast: CastFile; choice: CastChoice } | null>(null);
+  const [castError, setCastError] = useState<string | null>(null);
 
   const setPicture = useCallback(
     (key: string, state: PictureState | null) => {
@@ -439,9 +522,10 @@ export function StoryStep(props: Props) {
       /** Draws one picture of the chain. Resolves to its data URL, or null if it failed. */
       const step = async (
         key: string,
-        kind: "character" | "talking" | "gesture" | "explain",
+        kind: "character" | "talking" | "gesture" | "explain" | "expression" | "flying",
         from?: string,
         fix?: string,
+        emotion?: (typeof EMOTIONS)[number],
       ): Promise<string | null> => {
         const existing = before[key];
         if (!fix && onlyMissing && existing?.status === "ready" && existing.picture.source === source) {
@@ -451,7 +535,7 @@ export function StoryStep(props: Props) {
         try {
           const reference = from ? await referencePng(from) : undefined;
           const dataUrl = await requestPicture(
-            { kind, ...request, ...(reference ? { reference } : {}), ...(fix ? { fix } : {}) },
+            { kind, ...request, ...(reference ? { reference } : {}), ...(fix ? { fix } : {}), ...(emotion ? { emotion } : {}) },
             pictureOptions(key),
           );
           const sprite = await loadSprite(dataUrl, true);
@@ -464,7 +548,11 @@ export function StoryStep(props: Props) {
       };
 
       if (!onlyMissing) {
-        for (const key of [keys.talk, keys.gesture, keys.gestureTalk, keys.explain, keys.explainTalk]) {
+        const faces = EMOTIONS.flatMap((emotion) => [
+          pictureKey.expression(characterId, emotion),
+          pictureKey.expressionTalking(characterId, emotion),
+        ]);
+        for (const key of [keys.talk, keys.gesture, keys.gestureTalk, keys.explain, keys.explainTalk, pictureKey.flying(characterId), ...faces]) {
           setPicture(key, null);
         }
       }
@@ -481,6 +569,14 @@ export function StoryStep(props: Props) {
       }
       // Everything after the standing pose is a bonus: if it fails, the character still works.
       await step(keys.talk, "talking", idle);
+      // A face for each feeling the character shows in the story (happy, sad…), drawn from the standing
+      // pose so only the face changes, and that face talking.
+      for (const emotion of emotionsFor(current, characterId)) {
+        const face = await step(pictureKey.expression(characterId, emotion), "expression", idle, undefined, emotion);
+        if (face) await step(pictureKey.expressionTalking(characterId, emotion), "talking", face);
+      }
+      // Characters who fly through a scene get a flying pose, drawn from the standing one.
+      if (fliesInStory(current, characterId)) await step(pictureKey.flying(characterId), "flying", idle);
       if (!live.current.gesturesOn) return;
       const gesture = await step(keys.gesture, "gesture", idle);
       if (gesture) await step(keys.gestureTalk, "talking", gesture);
@@ -489,6 +585,82 @@ export function StoryStep(props: Props) {
     },
     [pictureOptions, setPicture],
   );
+
+  /* ---------------- Save cast / Load cast ---------------- */
+
+  const readyPicture = (key: string) => {
+    const state = pictures[key];
+    return state?.status === "ready" ? state.picture.dataUrl : undefined;
+  };
+  const canSaveCast = story.characters.some((character) => readyPicture(pictureKey.character(character.id)));
+
+  /** Saves every picture of the characters, and the places, to a file on this computer. */
+  const saveCast = () => {
+    const file = buildCastFile(story, readyPicture, new Date());
+    downloadText(`${fileBase}-cast.json`, JSON.stringify(file), "application/json");
+  };
+
+  const openCast = useCallback(async (file: File) => {
+    setCastError(null);
+    if (file.size > MAX_CAST_FILE_BYTES) {
+      setCastError("That file is too big to be a saved cast.");
+      return;
+    }
+    try {
+      const cast = parseCastFile(await file.text());
+      setCastOffer({ cast, choice: matchCast(live.current.story, cast) });
+    } catch (err) {
+      setCastError(err instanceof Error ? err.message : "That file couldn't be read.");
+    }
+  }, []);
+
+  /**
+   * Puts the saved characters and places into this story and uses their
+   * pictures as they are. They were checked when they were first drawn, so
+   * they are marked as checked and are not drawn again.
+   */
+  const applyCast = useCallback(async () => {
+    const offer = castOffer;
+    if (!offer) return;
+    setCastOffer(null);
+    const { cast, choice } = offer;
+    const voices = live.current.voiceList.voices;
+    const next = storyWithCast(live.current.story, cast, choice, (voice) => voices.some((option) => option.id === voice));
+    changeStory(() => next);
+
+    const checked: Record<string, { source: string; matches: boolean | null; problems: string[]; redraws: number }> = {};
+    const loads: Array<Promise<void>> = [];
+    const use = (key: string, dataUrl: string, source: string, trim: boolean) =>
+      loads.push(
+        loadSprite(dataUrl, trim)
+          .then((sprite) => setPicture(key, { status: "ready", picture: { dataUrl, sprite, source } }))
+          .catch(() => setPicture(key, null)),
+      );
+    choice.characters.forEach((characterId, i) => {
+      const character = characterId ? next.characters.find((item) => item.id === characterId) : undefined;
+      if (!character) return;
+      const saved = cast.characters[i];
+      const source = pictureSource.character(next, character);
+      for (const [pose, key] of characterPoses(character.id)) {
+        const dataUrl = saved.pictures[pose];
+        // A pose the file doesn't have is cleared, so no picture from before is mixed in.
+        if (dataUrl) use(key, dataUrl, source, true);
+        else setPicture(key, null);
+      }
+      checked[pictureKey.character(character.id)] = { source, matches: true, problems: [], redraws: 0 };
+    });
+    choice.places.forEach((locationId, i) => {
+      const location = locationId ? next.locations.find((item) => item.id === locationId) : undefined;
+      const saved = cast.places[i];
+      // A background saved for another shape of video is drawn again instead.
+      if (!location || saved.aspectRatio !== next.aspectRatio) return;
+      const source = pictureSource.place(next, location);
+      use(pictureKey.place(location.id), saved.picture, source, false);
+      checked[pictureKey.place(location.id)] = { source, matches: true, problems: [], redraws: 0 };
+    });
+    setPictureChecks((all) => ({ ...all, ...checked }));
+    await Promise.all(loads);
+  }, [castOffer, changeStory, setPicture]);
 
   const drawPlace = useCallback(
     async (locationId: string) => {
@@ -762,7 +934,7 @@ export function StoryStep(props: Props) {
     if (!ctx) return null;
     // Just before the first line, when everyone has arrived and nobody is speaking yet.
     const time = storySceneStart(wide, busiest, timeLine) + SCENE_LEAD_SEC * 0.95;
-    drawStoryFrame(ctx, wide, time, assets, { settled: true });
+    drawStoryFrame(ctx, wide, time, assets, { settled: true, title: false });
     return thumbnailFrom(canvas, story.title, fonts.heading);
   }, [assets, fonts, story, timeLine]);
 
@@ -780,9 +952,18 @@ export function StoryStep(props: Props) {
             follow: endCardOn,
             apiKey,
             makeThumbnail,
+            durationSec: video.duration,
+            shape: story.aspectRatio,
+            // Each scene's first line, or its place when it has no words.
+            scenes: insightsScenes(
+              story.scenes.map((scene, index) => ({
+                startSec: storySceneStart(story, index, timeLine),
+                text: scene.lines[0]?.text || story.locations.find((place) => place.id === scene.locationId)?.name || "",
+              })),
+            ),
           }
         : undefined,
-    [props.youtubeEnabled, story, language, hasVoices, apiKey, makeThumbnail, facts, endCardOn],
+    [props.youtubeEnabled, story, language, hasVoices, apiKey, makeThumbnail, facts, endCardOn, video.duration, timeLine],
   );
 
   /* ---------------- Other languages ---------------- */
@@ -802,7 +983,7 @@ export function StoryStep(props: Props) {
         "/api/translate",
         { language: target, kind: "story", texts: storyTexts(current) },
         TranslateResponseSchema,
-        { apiKey: live.current.apiKey || undefined, timeoutMs: 75_000 },
+        { apiKey: live.current.apiKey || undefined, timeoutMs: 180_000 },
       );
       if (!aliveRef.current) return;
       savedTexts.current.set(language, storyTexts(live.current.story));
@@ -1062,6 +1243,19 @@ export function StoryStep(props: Props) {
             onUseOwnKey={props.onUseOwnKey}
           />
 
+          <CastPanel
+            story={story}
+            canSave={canSaveCast}
+            disabled={isRecording || pictureBatch !== null}
+            offer={castOffer}
+            error={castError}
+            onSave={saveCast}
+            onOpen={(file) => void openCast(file)}
+            onChoose={(choice) => setCastOffer((current) => (current ? { ...current, choice } : current))}
+            onUse={() => void applyCast()}
+            onCancel={() => setCastOffer(null)}
+          />
+
           <StoryPictures
             story={story}
             pictures={pictures}
@@ -1122,6 +1316,12 @@ export function StoryStep(props: Props) {
             onToggleVoices={() => {
               playerRef.current?.pause();
               setVoicesOn((on) => !on);
+              invalidate();
+            }}
+            musicOn={musicOn}
+            onToggleMusic={() => {
+              playerRef.current?.pause();
+              setMusicOn((on) => !on);
               invalidate();
             }}
             onListen={listen}

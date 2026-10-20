@@ -2,6 +2,8 @@
 
 import { useId, useState } from "react";
 import {
+  EMOTIONS,
+  EMOTION_LABELS,
   NARRATOR,
   STORY_LIMITS,
   sceneDuration,
@@ -235,6 +237,43 @@ function SceneEditor({ story, scene, index, count, onUpdate, onDelete }: CardPro
         </p>
       </fieldset>
 
+      {scene.onStage.length > 0 && (
+        <fieldset>
+          <legend className="mb-1 font-semibold">Who flies through this scene</legend>
+          <div className="flex flex-wrap gap-x-5 gap-y-1">
+            {story.characters
+              .filter((character) => scene.onStage.includes(character.id))
+              .map((character) => {
+                const flies = scene.flying?.includes(character.id) ?? false;
+                return (
+                  <label key={character.id} className="flex min-h-11 cursor-pointer items-center gap-2">
+                    <input
+                      type="checkbox"
+                      checked={flies}
+                      onChange={() =>
+                        onUpdate((current) => {
+                          const flying = flies
+                            ? (current.flying ?? []).filter((item) => item !== character.id)
+                            : [...(current.flying ?? []), character.id];
+                          const next: typeof current = { ...current, flying };
+                          if (flying.length === 0) delete next.flying;
+                          return next;
+                        })
+                      }
+                      className="size-5 accent-brand"
+                    />
+                    {character.name || "Character"}
+                  </label>
+                );
+              })}
+          </div>
+          <p className="mt-1 text-sm text-muted">
+            An action scene: they swoop across the picture and the camera follows them. They are drawn
+            once more, flying.
+          </p>
+        </fieldset>
+      )}
+
       <fieldset>
         <legend className="mb-1 font-semibold">Lines</legend>
         <ol className="space-y-3">
@@ -300,6 +339,40 @@ function SceneEditor({ story, scene, index, count, onUpdate, onDelete }: CardPro
                 onChange={(event) => setLine(lineIndex, { how: event.target.value })}
                 className={`${inputClass} min-h-11 text-sm`}
               />
+              {line.speaker !== NARRATOR && (
+                <>
+                  <label htmlFor={`${id}-face-${lineIndex}`} className="mb-1 mt-2 block text-sm font-semibold">
+                    Face <span className="font-normal text-muted">(the feeling while saying it)</span>
+                  </label>
+                  <select
+                    id={`${id}-face-${lineIndex}`}
+                    value={line.emotion ?? "neutral"}
+                    onChange={(event) => {
+                      const emotion = event.target.value as (typeof EMOTIONS)[number];
+                      setLine(lineIndex, { emotion: emotion === "neutral" ? undefined : emotion });
+                    }}
+                    className={`${inputClass} min-h-11 text-sm`}
+                  >
+                    {EMOTIONS.map((emotion) => (
+                      <option key={emotion} value={emotion}>
+                        {EMOTION_LABELS[emotion]}
+                      </option>
+                    ))}
+                  </select>
+                  <label className="mt-2 flex min-h-11 cursor-pointer items-center gap-2 text-sm">
+                    <input
+                      type="checkbox"
+                      checked={line.thought === true}
+                      onChange={(event) => setLine(lineIndex, { thought: event.target.checked ? true : undefined })}
+                      className="size-5 accent-brand"
+                    />
+                    <span>
+                      <span className="font-semibold">A thought</span>{" "}
+                      <span className="text-muted">(heard, not said aloud: the mouth stays closed)</span>
+                    </span>
+                  </label>
+                </>
+              )}
             </li>
           ))}
         </ol>

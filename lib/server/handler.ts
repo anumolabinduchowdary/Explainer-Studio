@@ -6,10 +6,9 @@ import { AppError, describeForLog, toAppError } from "./appError";
 import { requireUser } from "./auth/session";
 import { createClient, type OpenAIClient } from "./openai";
 import { clientIp, rateLimit, requestsPerMinute } from "./rateLimit";
+import { requestTimeLimitMs } from "./timeLimit";
 
 const DEFAULT_MAX_BODY_CHARS = 100_000;
-/** Kept under the routes' maxDuration (60s) so we can answer before the platform cuts us off. */
-const DEFAULT_DEADLINE_MS = 55_000;
 
 type Context<Body> = {
   body: Body;
@@ -76,7 +75,8 @@ function handle<Schema extends z.ZodType>(
       const body = await readBody(req, config.schema, config.maxBodyChars ?? DEFAULT_MAX_BODY_CHARS);
       const signal = AbortSignal.any([
         req.signal,
-        AbortSignal.timeout(config.deadlineMs ?? DEFAULT_DEADLINE_MS),
+        // Kept under the routes' maxDuration on Vercel, so we can answer before the platform cuts us off.
+        AbortSignal.timeout(config.deadlineMs ?? requestTimeLimitMs()),
       ]);
 
       const result = await run(req, body, signal);

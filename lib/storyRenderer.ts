@@ -1,4 +1,15 @@
 import { dimensionsFor, type Dimensions, type FrameOptions } from "./renderer";
+import { flightAt } from "./flight";
+import {
+  drawAmbience,
+  drawFlame,
+  drawForegroundEmbers,
+  drawMoodLight,
+  drawSpreadingFire,
+  fireFlash,
+  firesFor,
+} from "./storyAtmosphere";
+import { sceneSetting, seedFrom } from "./storyMood";
 import {
   NARRATOR,
   SCENE_LEAD_SEC,
@@ -6,22 +17,27 @@ import {
   captionChunks,
   characterName,
   estimateLine,
+  feelingAt,
   gestureAt,
   locateStory,
+  sceneDuration,
   NO_GESTURE,
+  type Emotion,
   type ExerciseCard,
   type Story,
   type StoryCharacter,
   type StoryLine,
+  type StoryScene,
   type TimeLine,
 } from "./story";
 
 /**
  * Draws a cartoon story: a background, up to five characters standing in
  * it (a bigger group stands in two rows), and word-by-word captions. The
- * speaker talks with their hands, blending smoothly between poses, and the
- * people listening nod along. The speaker bounces and (when a talking
- * pose has been drawn) opens and closes their mouth.
+ * speaker talks with their hands, blending smoothly between poses, opens and
+ * closes their mouth (when a talking pose has been drawn). Everyone else
+ * stands perfectly still: nobody bounces, breathes, nods or leans. The camera
+ * glides in on whoever is speaking, and scenes fade softly into each other.
  *
  * Like the explainer renderer, one function paints any moment, and both the
  * preview and the recording use it.
@@ -46,6 +62,13 @@ export type CharacterSprites = {
    * twin. The speaker moves into and out of them while talking.
    */
   gestures?: Array<{ idle: Sprite; talk?: Sprite }>;
+  /**
+   * The same character with a feeling on their face (happy, sad…), each with
+   * its mouth-open twin. Used while the character says a line with that feeling.
+   */
+  expressions?: ReadonlyMap<Emotion, { idle: Sprite; talk?: Sprite }>;
+  /** The character flying (body level, heading right), for scenes they fly through. */
+  flying?: Sprite;
 };
 
 export type StoryRenderAssets = {
@@ -181,13 +204,23 @@ export function storyCharacterScale(
   return Math.max(MIN_STORY_SCALE, scale);
 }
 
-/** The characters on screen in a scene, in the scene's order. */
+/** The characters on screen in a scene, in the story's cast order. */
 function sceneCast(story: Story, scene: Story["scenes"][number]): StoryCharacter[] {
-  return scene.onStage
-    .map((id) => story.characters.find((character) => character.id === id))
-    .filter((character): character is StoryCharacter => Boolean(character))
+  // Always in the story's cast order, so each character keeps the same side of the screen in every
+  // scene, as in a film. (Scenes list who is on stage in any order, often the first speaker first.)
+  // Characters flying through the scene are not standing: they are drawn on their flight path instead.
+  const flyers = sceneFlyers(scene);
+  return story.characters
+    .filter((character) => scene.onStage.includes(character.id) && !flyers.includes(character.id))
     .slice(0, STORY_LIMITS.onStage);
 }
+
+/** The characters flying through a scene (only those on screen in it). */
+function sceneFlyers(scene: StoryScene): string[] {
+  return (scene.flying ?? []).filter((id) => scene.onStage.includes(id));
+}
+
+
 
 export type StagePlace = {
   /** Centre of the character, as a fraction of the width. */
@@ -320,26 +353,6 @@ function drawPlaceholderCharacter(
   ctx.fillText(initial, 0, -h + head * 1.18);
 }
 
-function drawSpeechMarks(ctx: CanvasRenderingContext2D, x: number, y: number, size: number, direction: number) {
-  ctx.save();
-  ctx.translate(x, y);
-  ctx.lineCap = "round";
-  for (const [colour, width] of [
-    ["#2B2118", size * 0.34],
-    ["#FFD43B", size * 0.2],
-  ] as const) {
-    ctx.strokeStyle = colour;
-    ctx.lineWidth = width;
-    for (const angle of [-0.15, -0.75, -1.35]) {
-      const a = direction > 0 ? angle : Math.PI - angle;
-      ctx.beginPath();
-      ctx.moveTo(Math.cos(a) * size * 0.5, Math.sin(a) * size * 0.5);
-      ctx.lineTo(Math.cos(a) * size, Math.sin(a) * size);
-      ctx.stroke();
-    }
-  }
-  ctx.restore();
-}
 
 /* ------------------------------------------------------------------ */
 /* Exercise cards                                                      */
@@ -478,39 +491,137 @@ function drawExerciseCard(
 /* Captions                                                            */
 /* ------------------------------------------------------------------ */
 
+/** Who a caption belongs to: a character speaking, the narrator, or a character's thought. */
+export type CaptionKind = "speech" | "narrator" | "thought";
+const CAPTION_COLOURS: Record<CaptionKind, string> = { speech: "#FFFFFF", narrator: "#FFE8A3", thought: "#FFD3EE" };
+
+/** A small heart, centred on (x, y), marking a thought. */
+function drawHeart(ctx: CanvasRenderingContext2D, x: number, y: number, size: number) {
+  ctx.beginPath();
+  ctx.moveTo(x, y + size * 0.45);
+  ctx.bezierCurveTo(x - size * 0.95, y - size * 0.15, x - size * 0.5, y - size * 0.85, x, y - size * 0.35);
+  ctx.bezierCurveTo(x + size * 0.5, y - size * 0.85, x + size * 0.95, y - size * 0.15, x, y + size * 0.45);
+  ctx.closePath();
+  ctx.stroke();
+  ctx.fill();
+}
+
 function drawCaption(
   ctx: CanvasRenderingContext2D,
   text: string,
-  narrator: boolean,
+  kind: CaptionKind,
   dims: Dimensions,
   layout: Layout,
   headingFont: string,
-  pop: number,
 ) {
   const { width: W, height: H } = dims;
   const label = text.toLocaleUpperCase();
+  const thought = kind === "thought";
+  // Thoughts lean, like a voice inside the head, and make room for their heart.
+  const weight = thought ? "italic 700" : "700";
   let size = layout.captionSize;
-  ctx.font = `700 ${size}px ${headingFont}`;
-  const widest = W * 0.86;
+  ctx.font = `${weight} ${size}px ${headingFont}`;
+  const widest = W * 0.86 - (thought ? size * 1.2 : 0);
   const measured = ctx.measureText(label).width;
   if (measured > widest) {
     size *= widest / measured;
-    ctx.font = `700 ${size}px ${headingFont}`;
+    ctx.font = `${weight} ${size}px ${headingFont}`;
   }
+  const textWidth = Math.min(measured, widest);
+  const shift = thought ? size * 0.6 : 0;
 
   ctx.save();
   ctx.translate(W / 2, H * layout.captionY);
-  ctx.scale(pop, pop);
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
   ctx.lineJoin = "round";
   // A dark outline keeps the words readable over any background.
   ctx.strokeStyle = "#1F1410";
   ctx.lineWidth = size * 0.22;
-  ctx.strokeText(label, 0, size * 0.05);
-  ctx.strokeText(label, 0, 0);
-  ctx.fillStyle = narrator ? "#FFE8A3" : "#FFFFFF";
-  ctx.fillText(label, 0, 0);
+  ctx.strokeText(label, shift, size * 0.05);
+  ctx.strokeText(label, shift, 0);
+  ctx.fillStyle = CAPTION_COLOURS[kind];
+  ctx.fillText(label, shift, 0);
+  if (thought) {
+    ctx.lineWidth = size * 0.12;
+    ctx.fillStyle = "#FF7FBF";
+    drawHeart(ctx, shift - textWidth / 2 - size * 0.6, 0, size * 0.55);
+  }
+  ctx.restore();
+}
+
+/** How long the story's name stays at the top of the opening scene, in seconds. */
+export const TITLE_SEC = 3.3;
+const TITLE_IN_SEC = 0.5;
+const TITLE_OUT_SEC = 0.7;
+
+/** How visible the opening title is at `time` (0 to 1). It fades in, holds, then fades out. */
+export function titleAlpha(time: number, settled = false): number {
+  if (time < 0 || time >= TITLE_SEC) return 0;
+  if (settled) return 1;
+  return Math.min(easeOutCubic(clamp01(time / TITLE_IN_SEC)), clamp01((TITLE_SEC - time) / TITLE_OUT_SEC));
+}
+
+/** The story's name at the top of the picture, with a small gold ornament under it. It never moves. */
+function drawOpeningTitle(
+  ctx: CanvasRenderingContext2D,
+  title: string,
+  dims: Dimensions,
+  layout: Layout,
+  font: string,
+  time: number,
+  settled: boolean,
+) {
+  const text = title.trim();
+  const alpha = titleAlpha(time, settled);
+  if (!text || alpha <= 0) return;
+  const { width: W, height: H } = dims;
+  const block = layoutText(ctx, text, W * 0.84, layout.captionSize * 1.1, font, 800);
+  const top = H * (W < H ? 0.1 : 0.07);
+  ctx.save();
+  ctx.globalAlpha = alpha;
+  ctx.font = block.font;
+  ctx.textAlign = "center";
+  ctx.textBaseline = "top";
+  ctx.lineJoin = "round";
+  block.lines.forEach((item, i) => {
+    const y = top + i * block.size * 1.15;
+    // A dark outline keeps the words readable over any background, like the captions.
+    ctx.strokeStyle = "#1F1410";
+    ctx.lineWidth = block.size * 0.2;
+    ctx.strokeText(item, W / 2, y + block.size * 0.04, block.maxWidth);
+    ctx.strokeText(item, W / 2, y, block.maxWidth);
+    ctx.fillStyle = "#FFFFFF";
+    ctx.fillText(item, W / 2, y, block.maxWidth);
+  });
+  const y = top + block.height + block.size * 0.3;
+  const half = Math.min(W * 0.16, block.size * 1.6);
+  const gem = block.size * 0.13;
+  ctx.lineCap = "round";
+  for (const [colour, width] of [
+    ["#1F1410", block.size * 0.12],
+    ["#F2C14E", block.size * 0.05],
+  ] as const) {
+    ctx.strokeStyle = colour;
+    ctx.lineWidth = width;
+    ctx.beginPath();
+    ctx.moveTo(W / 2 - half, y);
+    ctx.lineTo(W / 2 - gem * 2, y);
+    ctx.moveTo(W / 2 + gem * 2, y);
+    ctx.lineTo(W / 2 + half, y);
+    ctx.stroke();
+  }
+  ctx.beginPath();
+  ctx.moveTo(W / 2, y - gem);
+  ctx.lineTo(W / 2 + gem, y);
+  ctx.lineTo(W / 2, y + gem);
+  ctx.lineTo(W / 2 - gem, y);
+  ctx.closePath();
+  ctx.fillStyle = "#F2C14E";
+  ctx.fill();
+  ctx.strokeStyle = "#1F1410";
+  ctx.lineWidth = block.size * 0.04;
+  ctx.stroke();
   ctx.restore();
 }
 
@@ -518,49 +629,147 @@ function drawCaption(
 /* The frame                                                           */
 /* ------------------------------------------------------------------ */
 
-/** Paints the story at `time` seconds onto the canvas context. */
-export function drawStoryFrame(
+/** How long one scene fades into the next, in seconds. */
+const CROSSFADE_SEC = 0.6;
+/** How long the camera takes to glide to a new speaker, in seconds (calm stories glide more slowly). */
+const SHOT_SEC = 0.7;
+const CALM_SHOT_SEC = 1.2;
+const easeInOutCubic = (t: number) => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2);
+
+/** Where the camera looks: the stage point at the centre of the frame, and how far it is zoomed in. */
+export type Shot = { scale: number; cx: number; cy: number };
+
+/** Where each character in a scene stands: their x, the line their feet stand on, and their height. */
+function stageFor(story: Story, scene: StoryScene, assets: StoryRenderAssets, dims: Dimensions) {
+  const { width: W, height: H } = dims;
+  const layout = layoutFor(dims);
+  const storyScale = storyCharacterScale(story, assets.characters, dims);
+  const cast = sceneCast(story, scene);
+  const places = arrangeStage(cast, dims);
+  return cast.map((character, i) => {
+    const floor = layout.floor - (places[i].row === "back" ? layout.rowLift : 0);
+    return { id: character.id, x: W * places[i].x, feet: H * floor, h: H * layout.heights[character.size] * storyScale };
+  });
+}
+
+/**
+ * The close-up for a speaking character: the camera zooms in so the speaker
+ * fills the frame, framed on their head and shoulders, never showing past the
+ * edge of the picture. Null for the narrator, someone not on stage, or a scene
+ * with an exercise card (which stays wide so the card never covers anyone).
+ */
+/** The action camera: a little closer in, tracking the flyer a moment behind, never past the picture's edges. */
+function chase(story: Story, sceneLocal: number, dims: Dimensions): Shot {
+  const { width: W, height: H } = dims;
+  const calm = story.calm === true;
+  const scale = calm ? 1.08 : 1.22;
+  const point = flightAt(Math.max(0, sceneLocal - 0.15), 0, calm);
+  const clampTo = (value: number, size: number) => Math.min(size - size / (2 * scale), Math.max(size / (2 * scale), value));
+  return { scale, cx: clampTo(W * point.x, W), cy: clampTo(H * (0.5 + (point.y - 0.5) * 0.6), H) };
+}
+
+function closeUp(story: Story, scene: StoryScene, speaker: string, assets: StoryRenderAssets, dims: Dimensions): Shot | null {
+  if (speaker === NARRATOR || scene.card) return null;
+  const spot = stageFor(story, scene, assets, dims).find((place) => place.id === speaker);
+  if (!spot) return null;
+  const { width: W, height: H } = dims;
+  const calm = story.calm === true;
+  const scale = calm ? 1.15 : W > H ? 1.45 : W === H ? 1.35 : 1.3;
+  const clampTo = (value: number, size: number) => Math.min(size - size / (2 * scale), Math.max(size / (2 * scale), value));
+  return { scale, cx: clampTo(spot.x, W), cy: clampTo(spot.feet - spot.h * 0.62, H) };
+}
+
+/**
+ * The camera at a moment: wide at the start of each scene and while the
+ * narrator speaks, gliding in on each character as they start talking, and
+ * across to the next speaker. Worked out from the time alone, so the preview
+ * and the downloaded video always match.
+ */
+export function storyCamera(
+  story: Story,
+  time: number,
+  assets: StoryRenderAssets,
+  dims: Dimensions,
+  settled = false,
+): Shot {
+  const wide: Shot = { scale: 1, cx: dims.width / 2, cy: dims.height / 2 };
+  const timeLine = assets.timeLine ?? estimateLine;
+  const moment = locateStory(story, time, timeLine);
+  const scene = story.scenes[moment.sceneIndex];
+  // An action scene: the camera follows whoever is flying instead of cutting to the speaker.
+  if (sceneFlyers(scene).length > 0) return chase(story, moment.sceneLocal, dims);
+  if (moment.lineIndex < 0) return wide;
+  const shotOf = (index: number) => (index < 0 ? wide : (closeUp(story, scene, scene.lines[index].speaker, assets, dims) ?? wide));
+  const to = shotOf(moment.lineIndex);
+  if (settled) return to;
+  const from = shotOf(moment.lineIndex - 1);
+  const t = easeInOutCubic(clamp01(moment.lineLocal / (story.calm === true ? CALM_SHOT_SEC : SHOT_SEC)));
+  // Glide in screen terms, so the zoom and the move stay smooth together.
+  return {
+    scale: from.scale + (to.scale - from.scale) * t,
+    cx: from.cx + (to.cx - from.cx) * t,
+    cy: from.cy + (to.cy - from.cy) * t,
+  };
+}
+
+/**
+ * Paints the stage at `time` (the background and the characters, through the camera), without
+ * captions or cards. `clock` is the real moment in the video, which keeps the background's
+ * moving touches going even while an earlier scene is held for the cross-fade.
+ */
+function paintStage(
   ctx: CanvasRenderingContext2D,
   story: Story,
   time: number,
   assets: StoryRenderAssets,
-  options: FrameOptions = {},
+  settled: boolean,
+  clock: number,
 ) {
   const dims = dimensionsFor(story.aspectRatio);
   const { width: W, height: H } = dims;
   const layout = layoutFor(dims);
-  const settled = options.settled ?? false;
-
   const timeLine = assets.timeLine ?? estimateLine;
   const moment = locateStory(story, time, timeLine);
   const scene = story.scenes[moment.sceneIndex];
   const line = moment.lineIndex >= 0 ? scene.lines[moment.lineIndex] : null;
   const timing = line ? timeLine(line) : null;
   const speakerId = line && line.speaker !== NARRATOR ? line.speaker : null;
+  // A thought is heard but not said: the speaker's mouth stays closed and their hands stay still.
   const speaking =
     timing !== null &&
     !settled &&
+    line?.thought !== true &&
     moment.lineLocal >= timing.speechStart &&
     moment.lineLocal < timing.speechEnd;
   // Follow the real voice when there is one; otherwise flap at a talking rhythm.
   const heard = line && speaking ? (assets.mouthOpen?.(line, moment.lineLocal) ?? null) : null;
   const mouthOpen = speaking && (heard ?? Math.sin(moment.lineLocal * Math.PI * 2 * 3.4) > -0.15);
 
-  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  // Calm (sensory-friendly) stories move less: a slower push-in and a smaller, slower zoom.
+  const calm = story.calm === true;
+  const motion = calm ? 0.4 : 1;
+  const camera = storyCamera(story, time, assets, dims, settled);
+  ctx.setTransform(camera.scale, 0, 0, camera.scale, W / 2 - camera.scale * camera.cx, H / 2 - camera.scale * camera.cy);
   ctx.globalAlpha = 1;
 
   // A slow push-in keeps a still background from feeling frozen.
-  // Calm (sensory-friendly) stories move less: no flash, a slower push-in, gentler bounce and sway.
-  const calm = story.calm === true;
-  const motion = calm ? 0.4 : 1;
   const zoom = settled ? 1.05 : 1.03 + 0.012 * motion * Math.min(moment.sceneLocal, 6);
   drawBackdrop(ctx, assets.places.get(scene.locationId), dims, layout.floor, zoom);
+  // Fireflies, drifting leaves or petals, dust in the light, rain or snow: behind everyone, and
+  // never in calm stories (see lib/storyAtmosphere.ts).
+  const setting = sceneSetting(story, scene);
+  const flyers = sceneFlyers(scene);
+  if (!calm) drawAmbience(ctx, dims, layout.floor, setting, seedFrom(`${scene.id}:${scene.locationId}`), clock, flyers.length > 0);
+  // In a burning place, flames burst up one after another, where the flyer passes.
+  const fires = setting.fire && !calm ? firesFor(scene, calm) : [];
+  if (fires.length > 0) drawSpreadingFire(ctx, dims, fires, moment.sceneLocal, clock);
   // Every character is drawn at one size for the whole story (see storyCharacterScale).
   const storyScale = storyCharacterScale(story, assets.characters, dims);
 
   /* Characters: each keeps its place on screen (slot i) whatever the painting order. */
   const cast = sceneCast(story, scene);
   const places = arrangeStage(cast, dims);
+  // Characters fade in where they stand at the start of a scene; they do not rise or jump.
   const arrive = settled ? 1 : easeOutCubic(clamp01(moment.sceneLocal / (SCENE_LEAD_SEC * 0.9)));
 
   // The back row is painted first. Within a row the speaker is painted last,
@@ -586,18 +795,9 @@ export function drawStoryFrame(
 
     const x = W * place.x;
     const facing = place.x > 0.5 ? -1 : 1; // pictures are drawn facing right
-    const bounce = isSpeaker && speaking ? -Math.abs(Math.sin(moment.lineLocal * Math.PI * 2.4)) * h * 0.018 * motion : 0;
-    const breathe = settled ? 1 : 1 + 0.006 * Math.sin(time * 1.7 + i * 1.3);
-
-    // Listeners nod along twice, a little after the middle of each line, each at their own moment.
-    let nod = 0;
-    if (!isSpeaker && speakerId && speaking && timing && !settled) {
-      const spoken = timing.speechEnd - timing.speechStart;
-      const at = timing.speechStart + spoken * 0.5 + i * 0.17;
-      const phase = (moment.lineLocal - at) / 0.55;
-      if (spoken > 1.2 && phase >= 0 && phase <= 1) nod = Math.abs(Math.sin(phase * Math.PI * 2)) * (calm ? 0.5 : 1);
-    }
-    const y = H * floor + bounce + (1 - arrive) * h * 0.08 + nod * h * 0.008;
+    // Everyone stands completely still: no breathing, nodding, leaning or bouncing.
+    // Only faces and hands change, and the camera shows who is talking.
+    const y = H * floor;
 
     ctx.save();
     ctx.globalAlpha = arrive;
@@ -608,12 +808,13 @@ export function drawStoryFrame(
     ctx.fill();
 
     ctx.translate(x, y);
-    // A speaker sways a little towards the person they are talking to; a listener leans in to nod.
-    if (isSpeaker && speaking) ctx.rotate(facing * 0.018 * motion * Math.sin(moment.lineLocal * Math.PI * 0.9));
-    if (nod) ctx.rotate(facing * 0.015 * nod);
-    ctx.scale(facing, breathe);
+    ctx.scale(facing, 1);
     if (sprites) {
-      const poses = sprites.gestures ?? [];
+      // While a character says a line with a feeling, their face shows it (and their hands stay still).
+      // Feelings last: an angry king stays angry while others speak (see feelingAt in lib/story.ts).
+      const feeling = feelingAt(scene, moment.lineIndex, character.id);
+      const face = feeling ? sprites.expressions?.get(feeling) : undefined;
+      const poses = face ? [] : (sprites.gestures ?? []);
       const hands =
         isSpeaker && speaking && poses.length > 0 && line && timing
           ? gestureAt(line, moment.lineLocal, timing, poses.length)
@@ -622,7 +823,7 @@ export function drawStoryFrame(
       const feet = -w / 2 + (sprites.idle.feetX ?? sprites.idle.width / 2) * scale;
       /** Paints one pose. Every pose is lined up by the feet and drawn at the standing pose's scale. */
       const paint = (index: number, alpha: number) => {
-        const set = index === NO_GESTURE ? sprites : (poses[index] ?? sprites);
+        const set = index === NO_GESTURE ? (face ?? sprites) : (poses[index] ?? sprites);
         const base = set.idle;
         const pose = isSpeaker && mouthOpen && set.talk ? set.talk : base;
         ctx.globalAlpha = arrive * alpha;
@@ -641,8 +842,7 @@ export function drawStoryFrame(
       if (blend >= 1 || hands.pose === hands.from) {
         paint(hands.pose, 1);
       } else {
-        // Moving between poses: the body stays solid while the arms fade from one pose to the other.
-        ctx.translate(0, -h * 0.006 * Math.sin(Math.PI * blend));
+        // Moving between poses: the body stays still while the arms fade from one pose to the other.
         if (blend < 0.5) {
           paint(hands.from, 1);
           paint(hands.pose, blend * 2);
@@ -663,11 +863,145 @@ export function drawStoryFrame(
       );
     }
     ctx.restore();
-
-    if (isSpeaker && speaking && Math.sin(moment.lineLocal * Math.PI * 2 * 1.7) > -0.3) {
-      drawSpeechMarks(ctx, x + facing * w * 0.3, y - h * 0.94, h * 0.07, facing);
-    }
   });
+
+  /* Flyers swoop across in front of everyone. */
+  flyers.forEach((id, index) => {
+    const character = story.characters.find((item) => item.id === id);
+    if (!character) return;
+    const standing = H * layout.heights[character.size] * storyScale;
+    drawFlyer(ctx, assets.characters.get(id), standing, dims, moment.sceneLocal, index, calm, fires.length > 0, clock, arrive);
+  });
+
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.globalAlpha = 1;
+  // Warm for happy scenes, cool for sad ones, blue at night, darker towards the edges.
+  drawMoodLight(ctx, dims, setting, calm, clock);
+  if (fires.length > 0) {
+    // A flash of firelight as each fire catches, and big embers rushing past the camera.
+    const flash = settled ? 0 : fireFlash(fires, moment.sceneLocal);
+    if (flash > 0.005) {
+      ctx.fillStyle = `rgba(255, 170, 90, ${flash.toFixed(3)})`;
+      ctx.fillRect(0, 0, W, H);
+    }
+    drawForegroundEmbers(ctx, dims, seedFrom(scene.id), clock);
+  }
+}
+
+/**
+ * A character flying along their path (see lib/flight.ts): the flying pose (or,
+ * until it is drawn, the standing one), tilted with the swoop, with a motion
+ * blur behind, speed streaks and, in a burning scene, a flame streaming from
+ * behind them.
+ */
+function drawFlyer(
+  ctx: CanvasRenderingContext2D,
+  sprites: CharacterSprites | undefined,
+  standingHeight: number,
+  { width: W, height: H }: Dimensions,
+  sceneLocal: number,
+  flyer: number,
+  calm: boolean,
+  burning: boolean,
+  clock: number,
+  alpha: number,
+) {
+  const sprite = sprites?.flying ?? sprites?.idle;
+  if (!sprite) return;
+  // A flying pose lies level, so it is sized by its length.
+  const length = standingHeight * (sprites?.flying ? 1.05 : 1);
+  const scale = length / Math.max(sprite.width, sprite.height);
+  const w = sprite.width * scale;
+  const h = sprite.height * scale;
+  // Two fading copies a moment behind make a motion blur (not in calm stories).
+  const copies: Array<[behind: number, strength: number]> = calm ? [[0, 1]] : [[0.1, 0.12], [0.05, 0.25], [0, 1]];
+  for (const [behind, strength] of copies) {
+    const point = flightAt(Math.max(0, sceneLocal - behind), flyer, calm);
+    if (!point.visible) continue;
+    ctx.save();
+    ctx.globalAlpha = alpha * strength;
+    ctx.translate(W * point.x, H * point.y);
+    ctx.scale(point.direction, 1); // pictures are drawn facing right
+    ctx.rotate(point.tilt);
+    if (strength === 1 && !calm) {
+      ctx.strokeStyle = "rgba(255, 255, 255, 0.4)";
+      ctx.lineWidth = Math.max(2, W * 0.004);
+      ctx.lineCap = "round";
+      ctx.beginPath();
+      for (let k = 0; k < 4; k++) {
+        const y = h * (-0.3 + 0.2 * k);
+        ctx.moveTo(-w * 0.55, y);
+        ctx.lineTo(-w * (0.85 + 0.12 * (k % 3)), y);
+      }
+      ctx.stroke();
+    }
+    if (strength === 1 && burning) {
+      // The burning tail: a flame streaming out behind.
+      ctx.save();
+      ctx.translate(-w * 0.44, h * 0.05);
+      ctx.rotate(-Math.PI / 2);
+      const flame = w * (0.42 + 0.06 * Math.sin(clock * 11));
+      drawFlame(ctx, 0, 0, flame * 0.5, flame, flame * 0.15 * Math.sin(clock * 7));
+      ctx.restore();
+    }
+    ctx.drawImage(sprite.source, -w / 2, -h / 2, w, h);
+    ctx.restore();
+  }
+}
+
+/** Paints the story at `time` seconds onto the canvas context. */
+export function drawStoryFrame(
+  ctx: CanvasRenderingContext2D,
+  story: Story,
+  time: number,
+  assets: StoryRenderAssets,
+  options: FrameOptions = {},
+) {
+  const dims = dimensionsFor(story.aspectRatio);
+  const { width: W, height: H } = dims;
+  const layout = layoutFor(dims);
+  const settled = options.settled ?? false;
+
+  const timeLine = assets.timeLine ?? estimateLine;
+  const moment = locateStory(story, time, timeLine);
+  const scene = story.scenes[moment.sceneIndex];
+  const line = moment.lineIndex >= 0 ? scene.lines[moment.lineIndex] : null;
+  const timing = line ? timeLine(line) : null;
+
+  /* The stage. At the start of a scene the last moment of the one before fades softly into it. */
+  const fade = settled || moment.sceneIndex === 0 ? 1 : clamp01(moment.sceneLocal / CROSSFADE_SEC);
+  const scratch = options.scratch;
+  const scratchCtx = fade < 1 ? (scratch?.getContext("2d") ?? null) : null;
+  if (fade < 1 && scratch && scratchCtx) {
+    paintStage(ctx, story, Math.max(0, time - moment.sceneLocal - 0.001), assets, false, time);
+    if (scratch.width !== W || scratch.height !== H) {
+      scratch.width = W;
+      scratch.height = H;
+    }
+    paintStage(scratchCtx, story, time, assets, false, time);
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.globalAlpha = easeInOutCubic(fade);
+    ctx.drawImage(scratch, 0, 0);
+    ctx.globalAlpha = 1;
+  } else {
+    paintStage(ctx, story, time, assets, settled, time);
+  }
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.globalAlpha = 1;
+
+  /* Film bars slide in for an action scene, and out again at its end. */
+  if (story.calm !== true && sceneFlyers(scene).length > 0) {
+    const length = sceneDuration(scene, timeLine);
+    const show = settled
+      ? 1
+      : easeInOutCubic(clamp01(moment.sceneLocal / 0.6)) * easeInOutCubic(clamp01((length - moment.sceneLocal) / 0.6));
+    const bar = H * 0.05 * show;
+    if (bar > 0.5) {
+      ctx.fillStyle = "#000000";
+      ctx.fillRect(0, 0, W, bar);
+      ctx.fillRect(0, H - bar, W, bar);
+    }
+  }
 
   /* Exercise card: the picture of the exercise, its name and how much. */
   if (scene.card) {
@@ -676,6 +1010,11 @@ export function drawStoryFrame(
     ctx.globalAlpha = appear;
     drawExerciseCard(ctx, scene.card, assets.cards?.get(scene.id), dims, assets.headingFont);
     ctx.restore();
+  }
+
+  /* The story's name over the first seconds (not when an exercise card fills the top). */
+  if (options.title !== false && !story.scenes[0].card) {
+    drawOpeningTitle(ctx, story.title, dims, layout, assets.headingFont, time, settled);
   }
 
   /* Caption: the chunk being "said" right now. */
@@ -688,29 +1027,20 @@ export function drawStoryFrame(
       const spoken = Math.max(0.2, timing.speechEnd - timing.speechStart);
       let start = timing.speechStart;
       let current = chunks[chunks.length - 1];
-      let sinceStart = moment.lineLocal;
       for (const chunk of chunks) {
         const length = (weight(chunk) / totalWeight) * spoken;
         if (moment.lineLocal < start + length) {
           current = chunk;
-          sinceStart = moment.lineLocal - start;
           break;
         }
         start += length;
       }
-      // Calm stories show each word without the little "pop".
-      const pop = settled || calm ? 1 : 0.86 + 0.14 * easeOutCubic(clamp01(sinceStart / 0.09));
-      drawCaption(ctx, current.text, line.speaker === NARRATOR, dims, layout, assets.headingFont, pop);
+      // Each group of words simply appears, without growing or popping.
+      const kind: CaptionKind = line.speaker === NARRATOR ? "narrator" : line.thought ? "thought" : "speech";
+      drawCaption(ctx, current.text, kind, dims, layout, assets.headingFont);
     }
   }
 
-  /* A quick soft flash marks each change of scene. */
-  if (!settled && !calm && moment.sceneIndex > 0 && moment.sceneLocal < 0.22) {
-    ctx.globalAlpha = 0.85 * (1 - moment.sceneLocal / 0.22);
-    ctx.fillStyle = "#FFFFFF";
-    ctx.fillRect(0, 0, W, H);
-    ctx.globalAlpha = 1;
-  }
 }
 
 /** A text description of the moment, for screen readers. */
@@ -723,7 +1053,9 @@ export function describeStoryMoment(
   const scene = story.scenes[moment.sceneIndex];
   const place = story.locations.find((location) => location.id === scene.locationId)?.name ?? "";
   const who = scene.onStage.map((id) => characterName(story, id)).join(", ");
-  const dialogue = scene.lines.map((line) => `${characterName(story, line.speaker)}: ${line.text}`).join(" ");
+  const dialogue = scene.lines
+    .map((line) => `${characterName(story, line.speaker)}${line.thought ? " (thinking)" : ""}: ${line.text}`)
+    .join(" ");
   return {
     index: moment.sceneIndex,
     count: story.scenes.length,

@@ -11,7 +11,12 @@ import type { DrawFunction } from "@/components/Player";
  * with a steady frame rate, which phones and social apps play reliably.
  */
 
-export const EXPORT_FPS = 30;
+/**
+ * 25 frames a second: the standard in India (PAL), smooth for cartoons, and a
+ * sixth fewer frames than 30, so videos are built about 17% faster (the
+ * graphics chip's encoder sets the pace, at about 5 ms a frame).
+ */
+export const EXPORT_FPS = 25;
 
 export type ExportJob = {
   width: number;
@@ -19,8 +24,11 @@ export type ExportJob = {
   /** Length in seconds. */
   duration: number;
   draw: DrawFunction;
-  /** The sound for the whole video, already mixed, or null for a silent video. */
-  sound: AudioBuffer | null;
+  /**
+   * The sound for the whole video, or null for a silent video. It may still be
+   * mixing: the frames are built meanwhile and the sound joins when it is ready.
+   */
+  sound: AudioBuffer | Promise<AudioBuffer> | null;
 };
 
 type ExportOptions = {
@@ -37,8 +45,23 @@ function videoBitrate(width: number, height: number): number {
   return Math.round(width * height * 1.6);
 }
 
-/** Whether this browser can build videos this way. If not, the app falls back to live recording. */
-export async function canBuildVideo(width: number, height: number, withSound: boolean): Promise<boolean> {
+const support = new Map<string, Promise<boolean>>();
+
+/**
+ * Whether this browser can build videos this way. If not, the app falls back
+ * to live recording. The answer is remembered, so asking again costs nothing.
+ */
+export function canBuildVideo(width: number, height: number, withSound: boolean): Promise<boolean> {
+  const key = `${width}x${height}:${withSound}`;
+  let answer = support.get(key);
+  if (!answer) {
+    answer = checkSupport(width, height, withSound);
+    support.set(key, answer);
+  }
+  return answer;
+}
+
+async function checkSupport(width: number, height: number, withSound: boolean): Promise<boolean> {
   try {
     if (typeof VideoEncoder === "undefined") return false;
     if (withSound && typeof AudioEncoder === "undefined") return false;
@@ -101,8 +124,15 @@ export async function buildVideo(job: ExportJob, options: ExportOptions = {}): P
 
   try {
     await output.start();
-    // Sound goes in alongside the picture; the library keeps the two interleaved.
-    const soundAdded = voices && sound ? voices.add(sound).then(() => voices.close()) : Promise.resolve();
+    // Sound goes in alongside the picture (as soon as it has been mixed); the library keeps the two interleaved.
+    const soundAdded =
+      voices && sound
+        ? Promise.resolve(sound)
+            .then((buffer) => voices.add(buffer))
+            .then(() => voices.close())
+        : Promise.resolve();
+    // If mixing fails, the error is reported when the video is finished, not as an unhandled rejection.
+    soundAdded.catch(() => undefined);
 
     const frames = Math.max(1, Math.round(duration * EXPORT_FPS));
     for (let frame = 0; frame < frames; frame++) {

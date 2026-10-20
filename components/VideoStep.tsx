@@ -17,7 +17,7 @@ import { TranslateResponseSchema, storyboardTexts, withStoryboardTexts, type Tex
 import { getVisual } from "@/lib/visuals";
 import { thumbnailFrom } from "@/lib/thumbnail";
 import { checkFacts, textsKey, type FactsState } from "@/lib/checks";
-import type { YouTubeInfo } from "@/lib/youtube";
+import { insightsScenes, type YouTubeInfo } from "@/lib/youtube";
 import { ExportPanel } from "./ExportPanel";
 import { LanguagePanel } from "./LanguagePanel";
 import { QualityPanel } from "./QualityPanel";
@@ -155,7 +155,7 @@ export function VideoStep(props: Props) {
         "/api/translate",
         { language: target, kind: "storyboard", texts: storyboardTexts(storyboard) },
         TranslateResponseSchema,
-        { apiKey: apiKey || undefined, timeoutMs: 75_000 },
+        { apiKey: apiKey || undefined, timeoutMs: 180_000 },
       );
       saved.current.set(language, storyboardTexts(storyboard));
       saved.current.set(target, texts);
@@ -240,9 +240,14 @@ export function VideoStep(props: Props) {
             follow: endCardOn,
             apiKey,
             makeThumbnail,
+            durationSec: video.duration,
+            shape: storyboard.aspectRatio,
+            scenes: insightsScenes(
+              storyboard.scenes.map((scene, index) => ({ startSec: sceneStart(storyboard, index), text: scene.heading || scene.body })),
+            ),
           }
         : undefined,
-    [props.youtubeEnabled, storyboard, storyboardText, language, apiKey, makeThumbnail, facts, endCardOn],
+    [props.youtubeEnabled, storyboard, storyboardText, language, apiKey, makeThumbnail, facts, endCardOn, video.duration],
   );
 
   const regenerate = async (sceneId: string, instruction: string) => {

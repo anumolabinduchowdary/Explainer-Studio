@@ -3,7 +3,10 @@
 import { useId } from "react";
 import {
   CHARACTER_SIZES,
+  EMOTION_LABELS,
   STORY_LIMITS,
+  emotionsFor,
+  fliesInStory,
   pictureKey,
   type Story,
   type StoryCharacter,
@@ -45,6 +48,12 @@ export function characterNeedsDrawing(
 ): boolean {
   const source = pictureSource.character(story, character);
   if (needsDrawing(pictures[pictureKey.character(character.id)], source)) return true;
+  // A face for every feeling the character shows in the story.
+  if (emotionsFor(story, character.id).some((emotion) => needsDrawing(pictures[pictureKey.expression(character.id, emotion)], source))) {
+    return true;
+  }
+  // A flying pose, if the character flies through a scene.
+  if (fliesInStory(story, character.id) && needsDrawing(pictures[pictureKey.flying(character.id)], source)) return true;
   return (
     gesturesOn &&
     (needsDrawing(pictures[pictureKey.gesture(character.id)], source) ||
@@ -213,6 +222,11 @@ export function StoryPictures(props: Props) {
                 talking={pictures[pictureKey.talking(character.id)]}
                 gesture={props.gesturesOn ? pictures[pictureKey.gesture(character.id)] : undefined}
                 explain={props.gesturesOn ? pictures[pictureKey.explain(character.id)] : undefined}
+                faces={emotionsFor(story, character.id).map((emotion) => ({
+                  label: EMOTION_LABELS[emotion],
+                  state: pictures[pictureKey.expression(character.id, emotion)],
+                }))}
+                flying={fliesInStory(story, character.id) ? pictures[pictureKey.flying(character.id)] : undefined}
                 gestureOn={!props.gestureOff.has(character.id)}
                 onToggleGesture={() => props.onToggleGesture(character.id)}
                 stale={isStale(
@@ -364,6 +378,10 @@ type CharacterCardProps = {
   /** The gesture poses (a hand raised, both hands open), when gestures are on for the story. */
   gesture: PictureState | undefined;
   explain: PictureState | undefined;
+  /** The faces for the feelings this character shows in the story. */
+  faces: Array<{ label: string; state: PictureState | undefined }>;
+  /** The flying pose, for a character who flies through a scene. */
+  flying?: PictureState;
   gestureOn: boolean;
   onToggleGesture: () => void;
   stale: boolean;
@@ -378,7 +396,9 @@ type CharacterCardProps = {
 function CharacterCard(props: CharacterCardProps) {
   const { character, picture, talking, gesture, explain } = props;
   const id = useId();
-  const drawing = [picture, talking, gesture, explain].some((state) => state?.status === "drawing");
+  const drawing = [picture, talking, gesture, explain, props.flying, ...props.faces.map((face) => face.state)].some(
+    (state) => state?.status === "drawing",
+  );
   const anyGesture = gesture?.status === "ready" || explain?.status === "ready";
   const name = character.name || "This character";
 
@@ -393,6 +413,11 @@ function CharacterCard(props: CharacterCardProps) {
           {explain && picture?.status === "ready" && (
             <Thumb state={explain} alt={`${name} with both hands open, explaining`} />
           )}
+          {picture?.status === "ready" &&
+            props.faces.map((face) => (
+              <Thumb key={face.label} state={face.state} alt={`${name}, ${face.label.toLowerCase()} face`} />
+            ))}
+          {props.flying && picture?.status === "ready" && <Thumb state={props.flying} alt={`${name} flying`} />}
         </div>
         <div className="min-w-0 flex-1 space-y-2">
           <div>
@@ -465,8 +490,8 @@ function CharacterCard(props: CharacterCardProps) {
       )}
       {picture?.status === "ready" && talking?.status === "failed" && (
         <p className="mt-2 rounded-xl bg-sun-soft px-3 py-2">
-          The talking pose could not be drawn, so {name} will bounce while speaking instead of
-          moving their mouth. Redraw to try again.
+          The talking pose could not be drawn, so {name}&apos;s mouth will not move while they
+          speak. Redraw to try again.
         </p>
       )}
 
